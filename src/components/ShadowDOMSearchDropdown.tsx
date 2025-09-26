@@ -1,6 +1,8 @@
 import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ShadowDOMSearchDropdownProps } from "../types";
+import { AutocompleteResponse } from "../types/api.types";
+import { ShadowDOMSearchDropdownProps } from "../types/ui.types";
+import { getErrorMessage } from "../utils/error";
 import KalifindSearchMobile from "./KalifindSearchMobile";
 import ScrollToTop from "./ScrollToTop";
 
@@ -10,7 +12,7 @@ const EcommerceSearch = lazy(() => import("./KalifindSearch.tsx"));
 const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
   isOpen,
   onClose,
-  storeUrl,
+  storeUrl = "",
 }) => {
   const shadowHostRef = useRef<HTMLDivElement>(null);
   const [shadowRoot, setShadowRoot] = useState<ShadowRoot | null>(null);
@@ -132,70 +134,67 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
     }
 
     setShowAutocomplete(true);
-    const debounceTimer = setTimeout(async () => {
-      setIsAutocompleteLoading(true);
-      try {
-        const params = new URLSearchParams();
-        params.append("q", searchQuery);
-        params.append("storeUrl", storeUrl);
+    const debounceTimer = setTimeout(() => {
+      void (async () => {
+        setIsAutocompleteLoading(true);
+        try {
+          const params = new URLSearchParams();
+          params.append("q", searchQuery);
+          params.append("storeUrl", storeUrl);
 
-        const response = await fetch(
-          `${import.meta.env.VITE_BACKEND_URL}/v1/autocomplete?${params.toString()}`,
-          {}
-        );
+          const response = await fetch(
+            `${import.meta.env.VITE_BACKEND_URL}/v1/autocomplete?${params.toString()}`,
+            {}
+          );
 
-        if (!response.ok) {
-          throw new Error("bad response");
+          if (!response.ok) {
+            throw new Error("bad response");
+          }
+
+          const result = await response.json() as AutocompleteResponse | { title: string; name: string; product_title: string; product_name: string }[];
+
+          // Better handling of different response formats
+          let rawSuggestions: string[] = [];
+          if (Array.isArray(result)) {
+            rawSuggestions = result
+              .map(
+                (r: { title: string; name: string; product_title: string; product_name: string }) => {
+                  // Handle different possible field names
+                  return r.title || r.name || r.product_title || r.product_name || "Unknown Product";
+                }
+              )
+              .filter(Boolean);
+          } else if ('suggestions' in result && Array.isArray(result.suggestions)) {
+            rawSuggestions = result.suggestions.map((s: string) => String(s));
+          } else if ('products' in result && Array.isArray(result.products)) {
+            rawSuggestions = result.products
+              .map((r) => {
+                return r.title || (r.name ?? "Unknown Product");
+              })
+              .filter(Boolean);
+          }
+
+          // Apply fuzzy matching and scoring to improve suggestions
+          const query = searchQuery.trim();
+          const scoredSuggestions = rawSuggestions
+            .map((suggestion) => ({
+              text: suggestion,
+              score: scoreSuggestion(query, suggestion),
+            }))
+            .filter((item) => item.score > 0) // Only include suggestions with positive scores
+            .sort((a, b) => b.score - a.score) // Sort by score (highest first)
+            .map((item) => item.text)
+            .slice(0, 10); // Limit to top 10 suggestions
+
+          setAutocompleteSuggestions(scoredSuggestions);
+          setHighlightedSuggestionIndex(-1); // Reset highlight when new suggestions arrive
+        } catch (error) {
+          console.error("Failed to fetch autocomplete suggestions:", getErrorMessage(error));
+          setAutocompleteSuggestions([]);
+        } finally {
+          setIsAutocompleteLoading(false);
         }
-
-        const result = await response.json();
-
-        // Better handling of different response formats
-        let rawSuggestions: string[] = [];
-        if (Array.isArray(result)) {
-          rawSuggestions = result
-            .map(
-              (r: { title: string; name: string; product_title: string; product_name: string }) => {
-                // Handle different possible field names
-                return r.title || r.name || r.product_title || r.product_name || String(r);
-              }
-            )
-            .filter(Boolean);
-        } else if (result && Array.isArray(result.suggestions)) {
-          rawSuggestions = result.suggestions.map((s: string) => String(s));
-        } else if (result && Array.isArray(result.products)) {
-          rawSuggestions = result.products
-            .map(
-              (r: { title: string; name: string; product_title: string; product_name: string }) => {
-                return r.title || r.name || r.product_title || r.product_name || String(r);
-              }
-            )
-            .filter(Boolean);
-        }
-
-        // Apply fuzzy matching and scoring to improve suggestions
-        const query = searchQuery.trim();
-        const scoredSuggestions = rawSuggestions
-          .map((suggestion) => ({
-            text: suggestion,
-            score: scoreSuggestion(query, suggestion),
-          }))
-          .filter((item) => item.score > 0) // Only include suggestions with positive scores
-          .sort((a, b) => b.score - a.score) // Sort by score (highest first)
-          .map((item) => item.text)
-          .slice(0, 10); // Limit to top 10 suggestions
-
-        console.log("Mobile raw suggestions:", rawSuggestions);
-        console.log("Mobile filtered and scored suggestions:", scoredSuggestions);
-
-        setAutocompleteSuggestions(scoredSuggestions);
-        setHighlightedSuggestionIndex(-1); // Reset highlight when new suggestions arrive
-      } catch (error) {
-        console.error("Failed to fetch autocomplete suggestions:", error);
-        setAutocompleteSuggestions([]);
-      } finally {
-        setIsAutocompleteLoading(false);
-      }
+      })();
     }, 300);
 
     return () => clearTimeout(debounceTimer);
@@ -490,7 +489,7 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
         // 4) Try to copy any existing styles from the main document that might be ours
         const headStyles = Array.from(document.head.querySelectorAll<HTMLStyleElement>("style"));
         headStyles.forEach((styleEl) => {
-          const css = styleEl.textContent || "";
+          const css = styleEl.textContent ?? "";
           // Look for our distinctive CSS patterns
           if (
             css.includes("--ring: 264 83% 58%") ||
@@ -509,7 +508,7 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
           document.head.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')
         );
         linkEls.forEach((link) => {
-          const href = link.getAttribute("href") || "";
+          const href = link.getAttribute("href") ?? "";
           if (/kalifind|search|cdn|kalifinder/i.test(href)) {
             const clone = link.cloneNode(true) as HTMLLinkElement;
             shadow.appendChild(clone);
@@ -582,7 +581,6 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
       };
 
       const handleSearch = (query: string) => {
-        console.log("Mobile handleSearch called with:", query);
         setSearchQuery(query);
         // Let the mobile autocomplete useEffect handle showAutocomplete state
         if (!query.trim()) {
@@ -594,8 +592,6 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
       };
 
       const handleSuggestionClick = (suggestion: string) => {
-        console.log("Mobile suggestion clicked:", suggestion);
-
         try {
           setSearchQuery(suggestion);
           setShowAutocomplete(false);
@@ -609,7 +605,7 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
       };
 
       // Custom EcommerceSearch wrapper that hides header on mobile/tablet
-      const EcommerceSearchWrapper = () => (
+      const _EcommerceSearchWrapper = () => (
         <div className="w-full px-2 sm:px-4">
           <EcommerceSearch
             storeUrl={storeUrl}
@@ -627,17 +623,15 @@ const ShadowDOMSearchDropdown: React.FC<ShadowDOMSearchDropdownProps> = ({
         <div className="fixed inset-0 z-50 min-h-screen">
           {/* Backdrop */}
           <div
-            className={`fixed inset-0 bg-foreground/20 backdrop-blur-sm transition-opacity duration-300 ${
-              isOpen ? "opacity-100" : "opacity-0"
-            }`}
+            className={`fixed inset-0 bg-foreground/20 backdrop-blur-sm transition-opacity duration-300 ${isOpen ? "opacity-100" : "opacity-0"
+              }`}
             onClick={onClose}
           />
 
           {/* Dropdown Panel */}
           <div
-            className={`fixed inset-0 max-h-screen overflow-y-auto bg-background shadow-xl transition-all duration-500 ${
-              isOpen ? "animate-slide-down" : "animate-slide-up"
-            }`}
+            className={`fixed inset-0 max-h-screen overflow-y-auto bg-background shadow-xl transition-all duration-500 ${isOpen ? "animate-slide-down" : "animate-slide-up"
+              }`}
           >
             <div className="h-full w-full overflow-y-auto">
               {isMobileOrTablet ? (

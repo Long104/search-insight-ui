@@ -54,45 +54,49 @@ const KalifindSearchMobile: React.FC<KalifindSearchMobileProps> = ({
     }
 
     setMobileShowAutocomplete(true);
-    const debounceTimer = setTimeout(async () => {
-      setMobileIsAutocompleteLoading(true);
-      try {
-        const params = new URLSearchParams();
-        params.append("q", searchQuery);
-        params.append("storeUrl", "https://findifly.kinsta.cloud"); // Use the store URL
+    const debounceTimer = setTimeout(() => {
+      void (async () => {
+        setMobileIsAutocompleteLoading(true);
+        try {
+          const params = new URLSearchParams();
+          params.append("q", searchQuery);
+          params.append("storeUrl", "https://findifly.kinsta.cloud"); // Use the store URL
 
-        const response = await fetch(
-          `${import.meta.env.VITE_BACKEND_URL}/v1/autocomplete?${params.toString()}`,
-          {}
-        );
+          const response = await fetch(
+            `${import.meta.env.VITE_BACKEND_URL}/v1/autocomplete?${params.toString()}`,
+            {}
+          );
 
-        if (!response.ok) {
-          throw new Error("bad response");
+          if (!response.ok) {
+            throw new Error("bad response");
+          }
+
+          const result = await response.json() as unknown;
+
+          // Handle different response formats
+          let rawSuggestions: string[] = [];
+          if (Array.isArray(result)) {
+            rawSuggestions = result
+              .map((r: Product) => r.title || (r.name ?? "Unknown Product"))
+              .filter(Boolean);
+          } else if (result && typeof result === 'object' && 'suggestions' in result && Array.isArray((result as { suggestions: unknown }).suggestions)) {
+            const { suggestions } = result as { suggestions: string[] };
+            rawSuggestions = suggestions.map((s: string) => String(s));
+          } else if (result && typeof result === 'object' && 'products' in result && Array.isArray((result as { products: unknown }).products)) {
+            const { products } = result as { products: Product[] };
+            rawSuggestions = products
+              .map((r: Product) => r.title || (r.name ?? "Unknown Product"))
+              .filter(Boolean);
+          }
+
+          setMobileAutocompleteSuggestions(rawSuggestions.slice(0, 10));
+        } catch (error) {
+          console.error("Mobile autocomplete error:", error);
+          setMobileAutocompleteSuggestions([]);
+        } finally {
+          setMobileIsAutocompleteLoading(false);
         }
-
-        const result = await response.json();
-
-        // Handle different response formats
-        let rawSuggestions: string[] = [];
-        if (Array.isArray(result)) {
-          rawSuggestions = result
-            .map((r: Product) => r.title || r.name || String(r))
-            .filter(Boolean);
-        } else if (result && Array.isArray(result.suggestions)) {
-          rawSuggestions = result.suggestions.map((s: string) => String(s));
-        } else if (result && Array.isArray(result.products)) {
-          rawSuggestions = result.products
-            .map((r: Product) => r.title || r.name || String(r))
-            .filter(Boolean);
-        }
-
-        setMobileAutocompleteSuggestions(rawSuggestions.slice(0, 10));
-      } catch (error) {
-        console.error("Mobile autocomplete error:", error);
-        setMobileAutocompleteSuggestions([]);
-      } finally {
-        setMobileIsAutocompleteLoading(false);
-      }
+      })();
     }, 300);
 
     return () => clearTimeout(debounceTimer);
@@ -100,8 +104,6 @@ const KalifindSearchMobile: React.FC<KalifindSearchMobileProps> = ({
 
   // Mobile suggestion click handler - same as desktop
   const handleMobileSuggestionClick = (suggestion: string) => {
-    console.log("Mobile suggestion clicked:", suggestion);
-
     // Close autocomplete
     setMobileShowAutocomplete(false);
     setMobileAutocompleteSuggestions([]);
@@ -191,20 +193,16 @@ const KalifindSearchMobile: React.FC<KalifindSearchMobileProps> = ({
                       }
                     }}
                     onBlur={(e) => {
-                      console.log("Mobile: Input blurred, relatedTarget:", e.relatedTarget);
                       // Only close autocomplete if the blur is not caused by clicking on a suggestion
-                      const relatedTarget = e.relatedTarget as HTMLElement;
+                      const relatedTarget = e.relatedTarget as HTMLElement | null;
                       const isClickingOnSuggestion =
-                        relatedTarget?.closest("[data-suggestion-item]") ||
+                        relatedTarget?.closest("[data-suggestion-item]") ??
                         relatedTarget?.closest("[data-autocomplete-dropdown]");
 
                       if (!isClickingOnSuggestion && !isInteractingWithDropdown) {
                         // Longer delay to allow for autocomplete to show and user to interact
                         setTimeout(() => {
-                          if (!isInteractingWithDropdown) {
-                            console.log("Mobile: Closing autocomplete after blur delay");
-                            setMobileShowAutocomplete(false);
-                          }
+                          setMobileShowAutocomplete(false);
                         }, 300);
                       }
                     }}
@@ -251,13 +249,11 @@ const KalifindSearchMobile: React.FC<KalifindSearchMobileProps> = ({
                       <div
                         key={index}
                         data-suggestion-item="true"
-                        className={`flex cursor-pointer items-center gap-2 rounded p-2 transition-colors hover:bg-muted ${
-                          index === highlightedSuggestionIndex ? "bg-muted" : ""
-                        }`}
+                        className={`flex cursor-pointer items-center gap-2 rounded p-2 transition-colors hover:bg-muted ${index === highlightedSuggestionIndex ? "bg-muted" : ""
+                          }`}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          console.log("Mobile suggestion clicked:", suggestion);
                           // Use mobile's own suggestion click handler
                           handleMobileSuggestionClick(suggestion);
                         }}
@@ -268,7 +264,7 @@ const KalifindSearchMobile: React.FC<KalifindSearchMobileProps> = ({
                     ))}
                   </div>
                 </>
-              ) : !mobileIsAutocompleteLoading ? (
+              ) : (
                 <div className="flex flex-col items-center justify-center py-6 text-center duration-300 animate-in fade-in">
                   <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted duration-500 animate-in zoom-in">
                     <Search className="h-6 w-6 text-muted-foreground" />
@@ -280,7 +276,7 @@ const KalifindSearchMobile: React.FC<KalifindSearchMobileProps> = ({
                     </p>
                   </div>
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
         )}

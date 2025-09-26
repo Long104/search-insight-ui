@@ -64,7 +64,7 @@ export const addToWooCommerceCart = async (product: CartProduct): Promise<CartRe
 
       // Check if the response indicates success
       if (result && (result.error || result.fragments === undefined)) {
-        throw new Error(result.message || "Failed to add to cart");
+        throw new Error(result.message ?? "Failed to add to cart");
       }
 
       console.log("WooCommerce cart success via fetch");

@@ -4,6 +4,14 @@ test.describe("Kalifind Search Functionality Tests", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("http://localhost:8080");
     await page.waitForLoadState("networkidle");
+
+    // Click the search icon to open the search dropdown
+    const searchIcon = page.locator('button[aria-label="Toggle search"]');
+    await expect(searchIcon).toBeVisible();
+    await searchIcon.click();
+
+    // Wait for the search dropdown to open
+    await page.waitForTimeout(500);
   });
 
   test("1. Initial State - Empty search box shows recommendations and popular searches", async ({

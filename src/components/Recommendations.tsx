@@ -7,7 +7,7 @@ interface RecommendationsProps {
   handleProductClick: (product: Product) => void;
   calculateDiscountPercentage: (regularPrice: string, salePrice: string) => number | null;
   addingToCart: string | null;
-  handleAddToCart: (product: Product) => void;
+  handleAddToCart: (product: Product) => Promise<void>;
 }
 
 const Recommendations: React.FC<RecommendationsProps> = ({
@@ -78,11 +78,11 @@ const Recommendations: React.FC<RecommendationsProps> = ({
             <div className="mt-auto !flex !items-center !justify-between">
               <div className="!flex !items-center !gap-[8px]">
                 {product.salePrice &&
-                product.salePrice !== "" &&
-                product.salePrice !== "0" &&
-                product.salePrice !== "0.00" &&
-                product.regularPrice &&
-                product.salePrice !== product.regularPrice ? (
+                  product.salePrice !== "" &&
+                  product.salePrice !== "0" &&
+                  product.salePrice !== "0.00" &&
+                  product.regularPrice &&
+                  product.salePrice !== product.regularPrice ? (
                   <div className="!flex !items-center !gap-2">
                     <span className="!text-[14px] !font-bold !text-primary sm:!text-[16px]">
                       {product.salePrice}
@@ -100,7 +100,7 @@ const Recommendations: React.FC<RecommendationsProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleAddToCart(product);
+                  void handleAddToCart(product);
                 }}
                 disabled={addingToCart === product.id}
                 className="!transform !rounded-md !bg-primary !p-[6px] !text-primary-foreground !transition-colors !duration-200 hover:!bg-primary-hover disabled:!cursor-not-allowed disabled:!opacity-50 group-hover:!scale-110 sm:!p-[8px]"

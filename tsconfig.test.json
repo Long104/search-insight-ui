@@ -1,7 +1,7 @@
 {
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
-    "types": ["node", "@types/jest"]
+    "types": ["node", "@playwright/test"]
   },
   "include": ["src", "**/*.spec.ts", "**/*.test.ts"]
 }

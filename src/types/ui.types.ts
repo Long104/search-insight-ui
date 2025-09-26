@@ -29,6 +29,12 @@ export interface SearchWidgetConfig {
   enableInfiniteScroll?: boolean;
 }
 
+export interface ShadowDOMSearchDropdownProps {
+  isOpen: boolean;
+  onClose: () => void;
+  storeUrl?: string;
+}
+
 export interface SearchWidgetProps extends SearchWidgetConfig {
   onClose?: () => void;
   searchQuery?: string;

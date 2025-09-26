@@ -64,8 +64,8 @@ const KalifindSearchDesktop: React.FC<KalifindSearchDesktopProps> = ({
                         // or if the input is being cleared
                         const relatedTarget = e.relatedTarget as HTMLElement;
                         const isClickingOnSuggestion =
-                          relatedTarget?.closest("[data-suggestion-item]") ||
-                          relatedTarget?.closest("[data-autocomplete-dropdown]");
+                          relatedTarget.closest("[data-suggestion-item]") ??
+                          relatedTarget.closest("[data-autocomplete-dropdown]");
 
                         if (!isClickingOnSuggestion && searchQuery.length === 0) {
                           setShowAutocomplete?.(false);

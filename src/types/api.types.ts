@@ -102,6 +102,19 @@ export interface Cart {
   itemCount: number;
 }
 
+export interface CartProduct extends Product {
+  storeUrl?: string;
+  shopifyVariantId?: string;
+  wooProductId?: string;
+}
+
+export interface CartResponse {
+  success: boolean;
+  message: string;
+  cart?: Cart;
+  error?: string;
+}
+
 // Recommendation related
 export interface Recommendation {
   products: Product[];
