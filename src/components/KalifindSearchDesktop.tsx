@@ -1,5 +1,5 @@
-import React from "react";
 import { Search, X } from "lucide-react";
+import React from "react";
 
 interface KalifindSearchDesktopProps {
   searchRef: React.RefObject<HTMLDivElement>;
@@ -21,16 +21,16 @@ const KalifindSearchDesktop: React.FC<KalifindSearchDesktopProps> = ({
   handleKeyDown,
   onClose,
   hideHeader = false,
-  showAutocomplete = false,
+  showAutocomplete: _showAutocomplete = false,
   setShowAutocomplete,
 }) => {
   return (
-    <div className="box-border !bg-background !min-h-screen w-screen lg:pt-[4px]">
+    <div className="box-border !min-h-screen w-screen !bg-background lg:pt-[4px]">
       {!hideHeader && (
-        <div className="!bg-background !w-full pt-[12px] lg:px-[48px]">
-          <div className="!flex !items-center justify-center !mx-auto flex-col lg:flex-row !w-full ">
-            <div className="!flex !items-center !gap-[8px] justify-between md:justify-normal">
-              <div className="lg:!flex !items-center !hidden w-[340px]">
+        <div className="!w-full !bg-background pt-[12px] lg:px-[48px]">
+          <div className="!mx-auto !flex !w-full flex-col !items-center justify-center lg:flex-row ">
+            <div className="!flex !items-center justify-between !gap-[8px] md:justify-normal">
+              <div className="!hidden w-[340px] !items-center lg:!flex">
                 <a href="/" className="!s-center">
                   <img
                     src={`https://kalifinder-search.pages.dev/KalifindLogo.png`}
@@ -42,16 +42,13 @@ const KalifindSearchDesktop: React.FC<KalifindSearchDesktopProps> = ({
             </div>
 
             <div
-              className="lg:pl-[0px] !flex-1 !relative !w-full px-[16px] md:px-0"
+              className="!relative !w-full !flex-1 px-[16px] md:px-0 lg:pl-[0px]"
               ref={searchRef}
             >
-              <div
-                className="!flex !items-center !gap-[8px] !flex-1 !w-full"
-                ref={searchRef}
-              >
-                <div className="!w-full flex ">
-                  <div className="!relative !flex-1 !w-full !border-b-2 !border-search-highlight">
-                    <Search className="!absolute !left-[7px] !top-1/2 !transform !-translate-y-1/2 !text-muted-foreground !w-[20px] !h-[20px]" />
+              <div className="!flex !w-full !flex-1 !items-center !gap-[8px]" ref={searchRef}>
+                <div className="flex !w-full ">
+                  <div className="!relative !w-full !flex-1 !border-b-2 !border-search-highlight">
+                    <Search className="!absolute !left-[7px] !top-1/2 !h-[20px] !w-[20px] !-translate-y-1/2 !transform !text-muted-foreground" />
                     <input
                       ref={inputRef}
                       type="text"
@@ -66,16 +63,17 @@ const KalifindSearchDesktop: React.FC<KalifindSearchDesktopProps> = ({
                         // Only close autocomplete if the blur is not caused by clicking on a suggestion
                         // or if the input is being cleared
                         const relatedTarget = e.relatedTarget as HTMLElement;
-                        const isClickingOnSuggestion = relatedTarget?.closest("[data-suggestion-item]") || 
-                                                      relatedTarget?.closest("[data-autocomplete-dropdown]");
-                        
+                        const isClickingOnSuggestion =
+                          relatedTarget?.closest("[data-suggestion-item]") ||
+                          relatedTarget?.closest("[data-autocomplete-dropdown]");
+
                         if (!isClickingOnSuggestion && searchQuery.length === 0) {
                           setShowAutocomplete?.(false);
                         }
                       }}
                       onKeyDown={handleKeyDown}
                       placeholder="Search"
-                      className="!w-full !pl-[30px] !pr-[16px] !py-[12px] !text-foreground !placeholder-muted-foreground focus:!outline-none focus:!border-none focus:!ring-0"
+                      className="!w-full !py-[12px] !pl-[30px] !pr-[16px] !text-foreground !placeholder-muted-foreground focus:!border-none focus:!outline-none focus:!ring-0"
                       style={{
                         background: "inherit",
                         border: "none",
@@ -85,11 +83,11 @@ const KalifindSearchDesktop: React.FC<KalifindSearchDesktopProps> = ({
                     />
                   </div>
                   <button
-                    className="!rounded-lg hover:!bg-muted/20 !transition-colors !duration-200 !flex-shrink-0"
+                    className="!flex-shrink-0 !rounded-lg !transition-colors !duration-200 hover:!bg-muted/20"
                     aria-label="Close search"
                     onClick={onClose}
                   >
-                    <X className="font-bold !mr-[10px] !w-[25px] !h-[25px] !text-muted-foreground hover:!text-foreground !transition-colors !duration-200" />
+                    <X className="!mr-[10px] !h-[25px] !w-[25px] font-bold !text-muted-foreground !transition-colors !duration-200 hover:!text-foreground" />
                   </button>
                 </div>
               </div>

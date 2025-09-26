@@ -1,16 +1,8 @@
-import React, {
-  useState,
-  useTransition,
-  useRef,
-  useEffect,
-  useMemo,
-  useCallback,
-} from "react";
-import { Search, ShoppingCart, X, Filter, ChevronDown } from "lucide-react";
+import { ChevronDown, Filter, Search, ShoppingCart, X } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-import { useDebounce } from "@/hooks/use-debounce";
-import { Slider } from "@/components/ui/slider";
-import { addToCart, handleCartError } from "@/utils/cart";
+import { apiService } from "@/services/api.service";
+
 import {
   Accordion,
   AccordionContent,
@@ -18,6 +10,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { Drawer, DrawerClose, DrawerContent, DrawerTrigger } from "@/components/ui/drawer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,18 +19,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerTrigger,
-} from "@/components/ui/drawer";
+import { Slider } from "@/components/ui/slider";
+import { useDebounce } from "@/hooks/use-debounce";
+import { addToCart, handleCartError } from "@/utils/cart";
 
-import { Product, FilterState } from "../types";
+import { FilterState, Product } from "../types";
+import { isAutocompleteResponse, isSearchResponse } from "../types/api.types";
 import Recommendations from "./Recommendations";
 
 const KalifindSearch: React.FC<{
-  storeUrl?: string;
+  storeUrl?: string | undefined;
   onClose?: () => void;
   searchQuery?: string;
   setSearchQuery: (query: string) => void;
@@ -60,12 +51,9 @@ const KalifindSearch: React.FC<{
   const [isLoading, setIsLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<
-    string[]
-  >([]);
+  const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<string[]>([]);
   const [isAutocompleteLoading, setIsAutocompleteLoading] = useState(false);
-  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] =
-    useState(-1);
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
   const [isPriceLoading, setIsPriceLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMoreProducts, setHasMoreProducts] = useState(true);
@@ -81,11 +69,7 @@ const KalifindSearch: React.FC<{
 
   const [recommendations, setRecommendations] = useState<Product[]>([]);
   const [recommendationsFetched, setRecommendationsFetched] = useState(false);
-  const [popularSearches, setPopularSearches] = useState<string[]>([
-    "shirt",
-    "underwear",
-    "plan",
-  ]);
+  const [popularSearches, setPopularSearches] = useState<string[]>(["shirt", "underwear", "plan"]);
   const [showFilters, setShowFilters] = useState(false);
   const [isInitialState, setIsInitialState] = useState(true);
   const [maxPrice, setMaxPrice] = useState<number>(10000); // Default max price
@@ -100,10 +84,10 @@ const KalifindSearch: React.FC<{
   const [brandCounts, setBrandCounts] = useState<{
     [key: string]: number;
   }>({});
-  const [colorCounts, setColorCounts] = useState<{
+  const [_colorCounts, _setColorCounts] = useState<{
     [key: string]: number;
   }>({});
-  const [sizeCounts, setSizeCounts] = useState<{
+  const [_sizeCounts, _setSizeCounts] = useState<{
     [key: string]: number;
   }>({});
   const [tagCounts, setTagCounts] = useState<{
@@ -158,7 +142,10 @@ const KalifindSearch: React.FC<{
     try {
       const storedSearches = localStorage.getItem("recentSearches");
       if (storedSearches) {
-        setRecentSearches(JSON.parse(storedSearches));
+        const parsed: unknown = JSON.parse(storedSearches);
+        if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+          setRecentSearches(parsed);
+        }
       }
     } catch (error) {
       console.error("Failed to parse recent searches from localStorage", error);
@@ -183,33 +170,26 @@ const KalifindSearch: React.FC<{
   const debouncedPriceRange = useDebounce(filters.priceRange, 300);
 
   // Fuzzy matching function for better autocomplete
-  const fuzzyMatch = useCallback(
-    (query: string, suggestion: string): boolean => {
-      if (!query || !suggestion) return false;
+  const fuzzyMatch = useCallback((query: string, suggestion: string): boolean => {
+    if (!query || !suggestion) return false;
 
-      const queryLower = query.toLowerCase().trim();
-      const suggestionLower = suggestion.toLowerCase().trim();
+    const queryLower = query.toLowerCase().trim();
+    const suggestionLower = suggestion.toLowerCase().trim();
 
-      // Exact match
-      if (suggestionLower.includes(queryLower)) return true;
+    // Exact match
+    if (suggestionLower.includes(queryLower)) return true;
 
-      // Fuzzy matching - check if all characters in query appear in order in suggestion
-      let queryIndex = 0;
-      for (
-        let i = 0;
-        i < suggestionLower.length && queryIndex < queryLower.length;
-        i++
-      ) {
-        if (suggestionLower[i] === queryLower[queryIndex]) {
-          queryIndex++;
-        }
+    // Fuzzy matching - check if all characters in query appear in order in suggestion
+    let queryIndex = 0;
+    for (let i = 0; i < suggestionLower.length && queryIndex < queryLower.length; i++) {
+      if (suggestionLower[i] === queryLower[queryIndex]) {
+        queryIndex++;
       }
+    }
 
-      // If we found all characters in order, it's a match
-      return queryIndex === queryLower.length;
-    },
-    [],
-  );
+    // If we found all characters in order, it's a match
+    return queryIndex === queryLower.length;
+  }, []);
 
   // Function to score and sort suggestions by relevance
   const scoreSuggestion = useCallback(
@@ -233,7 +213,7 @@ const KalifindSearch: React.FC<{
 
       return 0;
     },
-    [fuzzyMatch],
+    [fuzzyMatch]
   );
 
   const searchRef = useRef<HTMLDivElement>(null);
@@ -257,69 +237,22 @@ const KalifindSearch: React.FC<{
   // Fetch popular searches
   const fetchPopularSearches = useCallback(async () => {
     if (!storeUrl) return;
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL}/v1/search/popular?storeUrl=${storeUrl}`,
-        {},
-      );
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch popular searches");
-      }
-
-      const result = await response.json();
-
-      // Handle response format
-      let searches: string[];
-      if (Array.isArray(result)) {
-        searches = result;
-      } else if (result && Array.isArray(result.searches)) {
-        searches = result.searches;
-      } else {
-        searches = ["shirt", "underwear", "plan"]; // Fallback to default
-      }
-
-      setPopularSearches(searches.slice(0, 6)); // Limit to 6 popular searches
-    } catch (error) {
-      console.error("Failed to fetch popular searches:", error);
-      // Keep default popular searches
-    }
+    const searches = await apiService.fetchPopularSearches(storeUrl);
+    setPopularSearches(searches.slice(0, 6)); // Limit to 6 popular searches
   }, [storeUrl]);
 
   // Fetch vendor facet configuration
   const fetchFacetConfiguration = useCallback(async () => {
     if (!storeUrl) return;
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_BACKEND_URL}/v1/facets?storeUrl=${storeUrl}`,
-        {},
-      );
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch facet configuration");
-      }
+    const facets = await apiService.fetchFacetConfiguration(storeUrl);
 
-      const result = await response.json();
-
-      // Update optional filters visibility based on vendor configuration
-      setShowOptionalFilters({
-        brands: result.some(
-          (facet: { field: string; visible: boolean }) =>
-            facet.field === "brand" && facet.visible,
-        ),
-        colors: result.some(
-          (facet: { field: string; visible: boolean }) =>
-            facet.field === "color" && facet.visible,
-        ),
-        tags: result.some(
-          (facet: { field: string; visible: boolean }) =>
-            facet.field === "tags" && facet.visible,
-        ),
-      });
-    } catch (error) {
-      console.error("Failed to fetch facet configuration:", error);
-      // Keep default values (all false)
-    }
+    setShowOptionalFilters({
+      brands: facets.some((facet) => facet.field === "brand" && facet.visible),
+      colors: facets.some((facet) => facet.field === "color" && facet.visible),
+      tags: facets.some((facet) => facet.field === "tags" && facet.visible),
+    });
   }, [storeUrl]);
 
   // Fetch vendor-controlled recommendations
@@ -329,7 +262,7 @@ const KalifindSearch: React.FC<{
       // First check if vendor has configured recommendations
       const configResponse = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/v1/recommendations/config?storeUrl=${storeUrl}`,
-        {},
+        {}
       );
 
       if (!configResponse.ok) {
@@ -338,7 +271,7 @@ const KalifindSearch: React.FC<{
         return;
       }
 
-      const config = await configResponse.json();
+      const config = (await configResponse.json()) as { enabled?: boolean };
 
       // Only fetch recommendations if vendor has enabled them
       if (!config.enabled) {
@@ -349,7 +282,7 @@ const KalifindSearch: React.FC<{
       // Fetch only vendor-configured recommendations
       const response = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/v1/search/recommended?storeUrl=${storeUrl}&type=vendor-configured`,
-        {},
+        {}
       );
 
       if (!response.ok) {
@@ -358,14 +291,15 @@ const KalifindSearch: React.FC<{
         return;
       }
 
-      const result = await response.json();
+      const result = (await response.json()) as unknown;
 
-      // Handle response format
+      // Handle response format with type safety
       let products: Product[];
       if (Array.isArray(result)) {
-        products = result;
-      } else if (result && Array.isArray(result.products)) {
-        products = result.products;
+        products = result as Product[];
+      } else if (isSearchResponse(result)) {
+        const { products: responseProducts } = result;
+        products = responseProducts;
       } else {
         products = [];
       }
@@ -409,12 +343,12 @@ const KalifindSearch: React.FC<{
       setIsInitialState(false);
       setHasSearched(true);
     }
-  }, [searchQuery, storeUrl, setHasSearched]);
+  }, [searchQuery, storeUrl, setHasSearched, hasSearched]);
 
   useEffect(() => {
-    fetchRecommendations();
-    fetchPopularSearches();
-    fetchFacetConfiguration();
+    void fetchRecommendations();
+    void fetchPopularSearches();
+    void fetchFacetConfiguration();
   }, [fetchRecommendations, fetchPopularSearches, fetchFacetConfiguration]);
 
   useEffect(() => {
@@ -429,26 +363,24 @@ const KalifindSearch: React.FC<{
 
           const response = await fetch(
             `${import.meta.env.VITE_BACKEND_URL}/v1/search?${params.toString()}`,
-            {},
+            {}
           );
 
           if (!response.ok) {
             throw new Error("bad response");
           }
 
-          const result = await response.json();
+          const result = (await response.json()) as unknown;
 
-          // Handle both array and object response formats
+          // Handle both array and object response formats with type safety
           let products: Product[];
           if (Array.isArray(result)) {
-            products = result;
-          } else if (result && Array.isArray(result.products)) {
-            products = result.products;
+            products = result as Product[];
+          } else if (isSearchResponse(result)) {
+            const { products: responseProducts } = result;
+            products = responseProducts;
           } else {
-            console.error(
-              "Kalifind Search: Unexpected API response format:",
-              result,
-            );
+            console.error("Kalifind Search: Unexpected API response format:", result);
             return;
           }
 
@@ -480,56 +412,58 @@ const KalifindSearch: React.FC<{
             let featuredCount = 0;
             let saleCount = 0;
 
-            // products.forEach((product: Product) => {
-            products.forEach((product: any) => {
+            products.forEach((product: Product) => {
               if (product.categories) {
                 product.categories.forEach((cat: string) => {
                   allCategories.add(cat);
-                  categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+                  categoryCounts[cat] = (categoryCounts[cat] ?? 0) + 1;
                 });
               }
               if (product.brands) {
                 product.brands.forEach((brand: string) => {
                   allBrands.add(brand);
-                  brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+                  brandCounts[brand] = (brandCounts[brand] ?? 0) + 1;
                 });
               }
               if (product.colors) {
                 product.colors.forEach((color: string) => {
                   allColors.add(color);
-                  colorCounts[color] = (colorCounts[color] || 0) + 1;
+                  colorCounts[color] = (colorCounts[color] ?? 0) + 1;
                 });
               }
               if (product.sizes) {
                 product.sizes.forEach((size: string) => {
                   allSizes.add(size);
-                  sizeCounts[size] = (sizeCounts[size] || 0) + 1;
+                  sizeCounts[size] = (sizeCounts[size] ?? 0) + 1;
                 });
               }
               if (product.tags) {
                 product.tags.forEach((tag: string) => {
                   allTags.add(tag);
-                  tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+                  tagCounts[tag] = (tagCounts[tag] ?? 0) + 1;
                 });
               }
-              
+
               // Count stock status
               if (product.stockStatus) {
-                stockStatusCounts[product.stockStatus] = (stockStatusCounts[product.stockStatus] || 0) + 1;
+                stockStatusCounts[product.stockStatus] =
+                  (stockStatusCounts[product.stockStatus] ?? 0) + 1;
               }
-              
+
               // Count featured products
               if (product.featured) {
                 featuredCount++;
               }
-              
+
               // Count sale products
-              if (product.salePrice && 
-                  product.salePrice !== "" && 
-                  product.salePrice !== "0" && 
-                  product.salePrice !== "0.00" && 
-                  product.regularPrice && 
-                  product.salePrice !== product.regularPrice) {
+              if (
+                product.salePrice &&
+                product.salePrice !== "" &&
+                product.salePrice !== "0" &&
+                product.salePrice !== "0.00" &&
+                product.regularPrice &&
+                product.salePrice !== product.regularPrice
+              ) {
                 saleCount++;
               }
             });
@@ -550,7 +484,9 @@ const KalifindSearch: React.FC<{
           }
         } catch (err) {
           if (retries > 0) {
-            setTimeout(() => fetchWithRetry(retries - 1), 1000);
+            setTimeout(() => {
+              void fetchWithRetry(retries - 1);
+            }, 1000);
           } else {
             console.error("Failed to fetch initial filter data:", err);
           }
@@ -559,10 +495,10 @@ const KalifindSearch: React.FC<{
         }
       };
 
-      fetchWithRetry();
+      void fetchWithRetry();
     };
 
-    initFilters();
+    void initFilters();
   }, [storeUrl]);
 
   // Click outside handler
@@ -607,76 +543,53 @@ const KalifindSearch: React.FC<{
     if (!storeUrl) return;
 
     // Only show autocomplete when user is typing and has a meaningful query
-    if (searchQuery.length > 0 && debouncedSearchQuery.trim()) {
+    if (searchQuery && searchQuery.length > 0 && debouncedSearchQuery?.trim()) {
       setShowAutocomplete(true);
       startTransition(() => {
         setIsAutocompleteLoading(true);
-        (async () => {
+        void (async () => {
           try {
             const params = new URLSearchParams();
             params.append("q", debouncedSearchQuery.trim());
             params.append("storeUrl", storeUrl);
 
             const url = `${import.meta.env.VITE_BACKEND_URL}/v1/autocomplete?${params.toString()}`;
-            console.log("Autocomplete API call:", url);
+            // Autocomplete API call
 
             const response = await fetch(url, {});
 
             if (!response.ok) {
-              console.error(
-                "Autocomplete API error:",
-                response.status,
-                response.statusText,
-              );
+              console.error("Autocomplete API error:", response.status, response.statusText);
               throw new Error("bad response");
             }
 
-            const result = await response.json();
-            console.log("Autocomplete API result:", result);
+            const result = (await response.json()) as unknown;
+            // Autocomplete API result processed
 
-            // Better handling of different response formats
+            // Better handling of different response formats with type safety
             let rawSuggestions: string[] = [];
             if (Array.isArray(result)) {
-              rawSuggestions = result
-                .map(
-                  (r: {
-                    title: string;
-                    name: string;
-                    product_title: string;
-                    product_name: string;
-                  }) => {
-                    // Handle different possible field names
-                    return (
-                      r.title ||
-                      r.name ||
-                      r.product_title ||
-                      r.product_name ||
-                      String(r)
-                    );
-                  },
-                )
+              rawSuggestions = (result as Product[])
+                .map((r: Product) => {
+                  // Handle different possible field names with nullish coalescing
+                  return (
+                    r.title ?? r.name ?? r.product_title ?? r.product_name ?? "Unknown Product"
+                  );
+                })
                 .filter(Boolean);
-            } else if (result && Array.isArray(result.suggestions)) {
-              rawSuggestions = result.suggestions.map((s: string) => String(s));
-            } else if (result && Array.isArray(result.products)) {
-              rawSuggestions = result.products
-                .map(
-                  (r: {
-                    title: string;
-                    name: string;
-                    product_title: string;
-                    product_name: string;
-                  }) => {
+            } else if (isAutocompleteResponse(result)) {
+              const { suggestions, products } = result;
+              if (suggestions) {
+                rawSuggestions = suggestions.map((s: string) => String(s));
+              } else if (products) {
+                rawSuggestions = products
+                  .map((r: Product) => {
                     return (
-                      r.title ||
-                      r.name ||
-                      r.product_title ||
-                      r.product_name ||
-                      String(r)
+                      r.title ?? r.name ?? r.product_title ?? r.product_name ?? "Unknown Product"
                     );
-                  },
-                )
-                .filter(Boolean);
+                  })
+                  .filter(Boolean);
+              }
             }
 
             // Apply fuzzy matching and scoring to improve suggestions
@@ -691,8 +604,7 @@ const KalifindSearch: React.FC<{
               .map((item) => item.text)
               .slice(0, 10); // Limit to top 10 suggestions
 
-            console.log("Raw suggestions:", rawSuggestions);
-            console.log("Filtered and scored suggestions:", scoredSuggestions);
+            // Process suggestions
 
             setAutocompleteSuggestions(scoredSuggestions);
             setHighlightedSuggestionIndex(-1); // Reset highlight when new suggestions arrive
@@ -739,7 +651,7 @@ const KalifindSearch: React.FC<{
               // Add popular search boosting
               const lowerQuery = query.toLowerCase();
               const matchingPopularTerms = popularSearches.filter((term) =>
-                lowerQuery.includes(term.toLowerCase()),
+                lowerQuery.includes(term.toLowerCase())
               );
               if (matchingPopularTerms.length > 0) {
                 params.append("popularTerms", matchingPopularTerms.join(","));
@@ -775,70 +687,40 @@ const KalifindSearch: React.FC<{
               params.append("onSale", "true");
             }
             params.append("minPrice", debouncedPriceRange[0].toString());
-            params.append(
-              "maxPrice",
-              debouncedPriceRange[1].toString() ?? "999999",
-            );
+            params.append("maxPrice", debouncedPriceRange[1].toString() ?? "999999");
             params.append("page", "1");
             params.append("limit", "12");
 
             const response = await fetch(
-              `${
-                import.meta.env.VITE_BACKEND_URL
-              }/v1/search?${params.toString()}`,
-              {},
+              `${import.meta.env.VITE_BACKEND_URL}/v1/search?${params.toString()}`,
+              {}
             );
 
-            console.log(
-              `${import.meta.env.VITE_BACKEND_URL}/v1/search?${params.toString()}`,
-            );
             if (!response.ok) {
               throw new Error("bad response");
             }
-            const result = await response.json();
+            const result = (await response.json()) as unknown;
 
-            // Handle paginated response format
+            // Handle paginated response format with type safety
             let products: Product[];
             let total = 0;
             let hasMore = false;
 
-            if (result && Array.isArray(result.products)) {
-              products = result.products;
-              total = result.total || 0;
-              hasMore = result.hasMore || false;
-
-              // Debug: Log the first product to see what fields are available
-              if (products.length > 0) {
-                console.log("Search result product:", {
-                  id: products[0].id,
-                  title: products[0].title,
-                  shopifyVariantId: products[0].shopifyVariantId,
-                  shopifyProductId: products[0].shopifyProductId,
-                  storeType: products[0].storeType,
-                  availableFields: Object.keys(products[0]),
-                });
-              }
+            if (isSearchResponse(result)) {
+              const {
+                products: responseProducts,
+                total: responseTotal,
+                hasMore: responseHasMore,
+              } = result;
+              products = responseProducts;
+              total = responseTotal;
+              hasMore = responseHasMore ?? false;
             } else if (Array.isArray(result)) {
               products = result;
               total = result.length;
               hasMore = false;
-
-              // Debug: Log the first product to see what fields are available
-              if (products.length > 0) {
-                console.log("Search result product (array format):", {
-                  id: products[0].id,
-                  title: products[0].title,
-                  shopifyVariantId: products[0].shopifyVariantId,
-                  shopifyProductId: products[0].shopifyProductId,
-                  storeType: products[0].storeType,
-                  availableFields: Object.keys(products[0]),
-                });
-              }
             } else {
-              console.error(
-                "Kalifind Search: Unexpected search response format:",
-                result,
-              );
+              console.error("Kalifind Search: Unexpected search response format:", result);
               products = [];
               total = 0;
               hasMore = false;
@@ -848,7 +730,6 @@ const KalifindSearch: React.FC<{
             setTotalProducts(total);
             setDisplayedProducts(products.length);
             setHasMoreProducts(hasMore);
-            console.log(products);
           } catch (error) {
             console.error("Failed to fetch products:", error);
             setFilteredProducts([]);
@@ -857,45 +738,30 @@ const KalifindSearch: React.FC<{
           }
         };
 
-        fetchProducts();
+        void fetchProducts();
       });
     },
-    [storeUrl, debouncedPriceRange, popularSearches, filters],
+    [storeUrl, debouncedPriceRange, popularSearches, filters]
   );
-
 
   // search products
   useEffect(() => {
-    console.log("Search effect triggered:", {
-      isPriceLoading,
-      storeUrl,
-      showRecommendations,
-      isInitialState,
-      debouncedSearchQuery,
-      searchQuery,
-      isSearchingFromSuggestion,
-    });
-
     // Skip search if we're in initial state showing recommendations
     if (isPriceLoading || !storeUrl || showRecommendations || isInitialState) {
-      console.log("Search effect skipped due to conditions");
       return; // Wait for the initial price to be loaded or skip if showing recommendations or in initial state
     }
 
     // Skip search if we're searching from a suggestion click (already handled)
     if (isSearchingFromSuggestion) {
-      console.log("Search effect skipped - already searching from suggestion");
       setIsSearchingFromSuggestion(false);
       return;
     }
 
     // Fetch all products when search query is empty, or perform search with query
-    if (!debouncedSearchQuery.trim()) {
-      console.log("Search effect - fetching all products (empty query)");
-      performSearch(""); // Pass empty string to fetch all products
+    if (!debouncedSearchQuery?.trim()) {
+      void performSearch(""); // Pass empty string to fetch all products
     } else {
-      console.log("Search effect - performing search with query");
-      performSearch(debouncedSearchQuery);
+      void performSearch(debouncedSearchQuery);
     }
   }, [
     isPriceLoading,
@@ -916,15 +782,13 @@ const KalifindSearch: React.FC<{
     performSearch,
     isSearchingFromSuggestion,
     forceSearch,
+    searchQuery,
   ]);
 
   const sortedProducts = useMemo(() => {
     // Ensure filteredProducts is an array before processing
     if (!Array.isArray(filteredProducts)) {
-      console.warn(
-        "Kalifind Search: filteredProducts is not an array:",
-        filteredProducts,
-      );
+      console.warn("Kalifind Search: filteredProducts is not an array:", filteredProducts);
       return [];
     }
 
@@ -935,20 +799,16 @@ const KalifindSearch: React.FC<{
       case "z-a":
         return productsToSort.sort((a, b) => b.title.localeCompare(a.title));
       case "price-asc":
-        return productsToSort.sort(
-          (a, b) => parseFloat(a.price) - parseFloat(b.price),
-        );
+        return productsToSort.sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
       case "price-desc":
-        return productsToSort.sort(
-          (a, b) => parseFloat(b.price) - parseFloat(a.price),
-        );
+        return productsToSort.sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
       default:
         return productsToSort;
     }
   }, [filteredProducts, sortOption]);
 
   const handleSearch = (query: string) => {
-    console.log("handleSearch called with:", query);
+    // Handle search called
     setSearchQuery(query);
     setShowRecommendations(false);
 
@@ -972,10 +832,10 @@ const KalifindSearch: React.FC<{
   const addToRecentSearches = (query: string) => {
     if (query.trim() && !recentSearches.includes(query.trim())) {
       setRecentSearches((prev) => {
-        const newSearches = [
-          query.trim(),
-          ...prev.filter((item) => item !== query.trim()),
-        ].slice(0, 10);
+        const newSearches = [query.trim(), ...prev.filter((item) => item !== query.trim())].slice(
+          0,
+          10
+        );
         return newSearches;
       });
     }
@@ -992,7 +852,7 @@ const KalifindSearch: React.FC<{
     // - Sets the clicked value into the search input
     // - The search useEffect will automatically trigger a search for that value
     // - Saves the clicked value into recent searches via Zustand and updates localStorage
-    console.log("Suggestion clicked:", suggestion);
+    // Suggestion clicked
 
     // Close autocomplete completely
     setShowAutocomplete(false);
@@ -1012,7 +872,7 @@ const KalifindSearch: React.FC<{
 
     // Set the search query and perform search directly
     setSearchQuery(suggestion);
-    performSearch(suggestion);
+    void performSearch(suggestion);
 
     // Blur input to close any mobile keyboards
     inputRef.current?.blur();
@@ -1024,12 +884,8 @@ const KalifindSearch: React.FC<{
       const query = event.currentTarget.value;
 
       // If there's a highlighted suggestion, use that instead
-      if (
-        highlightedSuggestionIndex >= 0 &&
-        autocompleteSuggestions[highlightedSuggestionIndex]
-      ) {
-        const selectedSuggestion =
-          autocompleteSuggestions[highlightedSuggestionIndex];
+      if (highlightedSuggestionIndex >= 0 && autocompleteSuggestions[highlightedSuggestionIndex]) {
+        const selectedSuggestion = autocompleteSuggestions[highlightedSuggestionIndex];
         handleSuggestionClick(selectedSuggestion);
         return;
       }
@@ -1054,21 +910,21 @@ const KalifindSearch: React.FC<{
       }
 
       // Force a search by incrementing the forceSearch counter
-      setForceSearch(prev => prev + 1);
+      setForceSearch((prev) => prev + 1);
 
       inputRef.current?.blur();
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       if (showAutocomplete && autocompleteSuggestions.length > 0) {
         setHighlightedSuggestionIndex((prev) =>
-          prev < autocompleteSuggestions.length - 1 ? prev + 1 : 0,
+          prev < autocompleteSuggestions.length - 1 ? prev + 1 : 0
         );
       }
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       if (showAutocomplete && autocompleteSuggestions.length > 0) {
         setHighlightedSuggestionIndex((prev) =>
-          prev > 0 ? prev - 1 : autocompleteSuggestions.length - 1,
+          prev > 0 ? prev - 1 : autocompleteSuggestions.length - 1
         );
       }
     } else if (event.key === "Escape") {
@@ -1126,9 +982,7 @@ const KalifindSearch: React.FC<{
   const handleTagChange = (tag: string) => {
     setFilters((prev) => ({
       ...prev,
-      tags: prev.tags.includes(tag)
-        ? prev.tags.filter((t) => t !== tag)
-        : [...prev.tags, tag],
+      tags: prev.tags.includes(tag) ? prev.tags.filter((t) => t !== tag) : [...prev.tags, tag],
     }));
   };
 
@@ -1203,7 +1057,7 @@ const KalifindSearch: React.FC<{
 
       const response = await fetch(
         `${import.meta.env.VITE_BACKEND_URL}/v1/search?${params.toString()}`,
-        {},
+        {}
       );
 
       if (!response.ok) {
@@ -1254,11 +1108,11 @@ const KalifindSearch: React.FC<{
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMoreProducts && !isLoadingMore) {
+        if (entries[0]?.isIntersecting && hasMoreProducts && !isLoadingMore) {
           loadMoreProducts();
         }
       },
-      { threshold: 0.1 },
+      { threshold: 0.1 }
     );
 
     const loadMoreTrigger = document.getElementById("load-more-trigger");
@@ -1274,25 +1128,12 @@ const KalifindSearch: React.FC<{
   }, [isMobile, hasMoreProducts, isLoadingMore, loadMoreProducts]);
 
   // Function to calculate discount percentage
-  const calculateDiscountPercentage = (
-    regularPrice: string,
-    salePrice: string,
-  ): number | null => {
+  const calculateDiscountPercentage = (regularPrice: string, salePrice: string): number | null => {
     try {
-      const regular = parseFloat(
-        regularPrice.replace(/[^\d.,]/g, "").replace(",", "."),
-      );
-      const sale = parseFloat(
-        salePrice.replace(/[^\d.,]/g, "").replace(",", "."),
-      );
+      const regular = parseFloat(regularPrice.replace(/[^\d.,]/g, "").replace(",", "."));
+      const sale = parseFloat(salePrice.replace(/[^\d.,]/g, "").replace(",", "."));
 
-      if (
-        isNaN(regular) ||
-        isNaN(sale) ||
-        regular <= 0 ||
-        sale <= 0 ||
-        sale >= regular
-      ) {
+      if (isNaN(regular) || isNaN(sale) || regular <= 0 || sale <= 0 || sale >= regular) {
         return null;
       }
 
@@ -1309,7 +1150,7 @@ const KalifindSearch: React.FC<{
     setShowAutocomplete(false);
     setAutocompleteSuggestions([]);
     setHighlightedSuggestionIndex(-1);
-    
+
     if (product.productUrl) {
       window.open(product.productUrl, "_blank");
     } else if (product.url) {
@@ -1352,17 +1193,17 @@ const KalifindSearch: React.FC<{
   };
 
   const LoadingSkeleton = () => (
-    <div className="!grid !grid-cols-2 sm:!grid-cols-2 xl:grid-cols-3 2xl:!grid-cols-4 !gap-[16px] !w-full">
+    <div className="!grid !w-full !grid-cols-2 !gap-[16px] sm:!grid-cols-2 xl:grid-cols-3 2xl:!grid-cols-4">
       {Array.from({ length: 8 }).map((_, i) => (
         <div
           key={i}
-          className="!bg-loading !rounded-lg !p-[8px] md:!p-[16px] !animate-pulse-slow !w-full"
+          className="!w-full !animate-pulse-slow !rounded-lg !bg-loading !p-[8px] md:!p-[16px]"
         >
-          <div className="!bg-loading-shimmer !h-[128px] md:!h-[192px] !rounded-md !mb-[12px] md:!mb-[16px] !relative !overflow-hidden">
-            <div className="!absolute !inset-0 !bg-gradient-to-r !from-transparent !via-loading-shimmer !to-transparent !animate-shimmer"></div>
+          <div className="!relative !mb-[12px] !h-[128px] !overflow-hidden !rounded-md !bg-loading-shimmer md:!mb-[16px] md:!h-[192px]">
+            <div className="!absolute !inset-0 !animate-shimmer !bg-gradient-to-r !from-transparent !via-loading-shimmer !to-transparent"></div>
           </div>
-          <div className="!bg-loading-shimmer !h-[16px] !rounded !mb-[8px]"></div>
-          <div className="!bg-loading-shimmer !h-[24px] !rounded !w-[80px]"></div>
+          <div className="!mb-[8px] !h-[16px] !rounded !bg-loading-shimmer"></div>
+          <div className="!h-[24px] !w-[80px] !rounded !bg-loading-shimmer"></div>
         </div>
       ))}
     </div>
@@ -1370,12 +1211,12 @@ const KalifindSearch: React.FC<{
 
   return (
     // <div className="box-border !bg-background !min-h-screen w-screen lg:pt-[4px] lg:px-[96px]">
-    <div className="box-border !bg-background !min-h-screen w-screen lg:pt-[4px]">
+    <div className="box-border !min-h-screen w-screen !bg-background lg:pt-[4px]">
       {!hideHeader && (
-        <div className="!bg-background !w-full pt-[12px] lg:px-[48px]">
-          <div className="!flex !items-center justify-center !mx-auto flex-col lg:flex-row !w-full ">
-            <div className="!flex !items-center !gap-[8px] justify-between md:justify-normal">
-              <div className="lg:!flex !items-center !hidden w-[340px]">
+        <div className="!w-full !bg-background pt-[12px] lg:px-[48px]">
+          <div className="!mx-auto !flex !w-full flex-col !items-center justify-center lg:flex-row ">
+            <div className="!flex !items-center justify-between !gap-[8px] md:justify-normal">
+              <div className="!hidden w-[340px] !items-center lg:!flex">
                 <a href="/" className="!s-center">
                   <img
                     src={`https://kalifinder-search.pages.dev/KalifindLogo.png`}
@@ -1387,36 +1228,34 @@ const KalifindSearch: React.FC<{
             </div>
 
             <div
-              className="lg:pl-[0px] !flex-1 !relative !w-full px-[16px] md:px-0"
+              className="!relative !w-full !flex-1 px-[16px] md:px-0 lg:pl-[0px]"
               ref={searchRef}
             >
-              <div
-                className="!flex !items-center !gap-[8px] !flex-1 !w-full"
-                ref={searchRef}
-              >
-                <div className="!w-full flex ">
-                  <div className="!relative !flex-1 !w-full !border-b-2 !border-search-highlight">
-                    <Search className="!absolute !left-[7px] !top-1/2 !transform !-translate-y-1/2 !text-muted-foreground !w-[20px] !h-[20px]" />
+              <div className="!flex !w-full !flex-1 !items-center !gap-[8px]" ref={searchRef}>
+                <div className="flex !w-full ">
+                  <div className="!relative !w-full !flex-1 !border-b-2 !border-search-highlight">
+                    <Search className="!absolute !left-[7px] !top-1/2 !h-[20px] !w-[20px] !-translate-y-1/2 !transform !text-muted-foreground" />
                     <input
                       ref={inputRef}
                       type="text"
                       value={searchQuery}
                       onChange={(e) => handleSearch(e.target.value)}
                       onFocus={() => {
-                        console.log("Input focused, searchQuery length:", searchQuery.length);
-                        if (searchQuery.length > 0) {
+                        // Input focused
+                        if (searchQuery && searchQuery.length > 0) {
                           setShowAutocomplete(true);
                           setIsInteractingWithDropdown(false);
                         }
                       }}
                       onBlur={(e) => {
-                        console.log("Input blurred, relatedTarget:", e.relatedTarget);
+                        // Input blurred
                         // Only close autocomplete if the blur is not caused by clicking on a suggestion
                         // or if the input is being cleared
                         const relatedTarget = e.relatedTarget as HTMLElement;
-                        const isClickingOnSuggestion = relatedTarget?.closest("[data-suggestion-item]") || 
-                                                      relatedTarget?.closest("[data-autocomplete-dropdown]");
-                        
+                        const isClickingOnSuggestion =
+                          relatedTarget?.closest("[data-suggestion-item]") ||
+                          relatedTarget?.closest("[data-autocomplete-dropdown]");
+
                         if (!isClickingOnSuggestion && !isInteractingWithDropdown) {
                           // Small delay to allow for suggestion clicks to process
                           setTimeout(() => {
@@ -1428,105 +1267,89 @@ const KalifindSearch: React.FC<{
                       }}
                       onKeyDown={handleKeyDown}
                       placeholder="Search"
-                      className="!w-full !pl-[30px] !pr-[16px] !py-[12px] !text-foreground !placeholder-muted-foreground focus:!outline-none focus:!border-none focus:!ring-0"
-                      style={{
-                        background: "inherit",
-                        border: "none",
-                        color: "inherit",
-                        paddingLeft: "30px",
-                      }}
+                      className="!w-full !border-none !bg-inherit !py-[12px] !pl-[30px] !pr-[16px] !text-foreground !placeholder-muted-foreground focus:!border-none focus:!outline-none focus:!ring-0"
                     />
 
                     {/* <div className="!absolute !right-[12px] !top-1/2 !transform !-translate-y-1/2 !flex !gap-[8px]"></div> */}
                   </div>
                   <button
-                    className="!rounded-lg hover:!bg-muted/20 !transition-colors !duration-200 !flex-shrink-0"
+                    className="!flex-shrink-0 !rounded-lg !transition-colors !duration-200 hover:!bg-muted/20"
                     aria-label="Close search"
                     onClick={onClose}
                   >
-                    <X className="font-bold !mr-[10px] !w-[25px] !h-[25px] !text-muted-foreground hover:!text-foreground !transition-colors !duration-200" />
+                    <X className="!mr-[10px] !h-[25px] !w-[25px] font-bold !text-muted-foreground !transition-colors !duration-200 hover:!text-foreground" />
                   </button>
                 </div>
               </div>
 
               {showAutocomplete &&
+                searchQuery &&
                 searchQuery.length > 0 &&
-                (isAutocompleteLoading ||
-                  autocompleteSuggestions.length > 0) && (
-                  <div 
+                (isAutocompleteLoading || autocompleteSuggestions.length > 0) && (
+                  <div
                     data-autocomplete-dropdown="true"
-                    className="!absolute !top-full !left-0 !right-0 !bg-background !border !border-border !rounded-lg !shadow-lg !z-[9999999] !mt-[4px] !w-full"
+                    className="!absolute !left-0 !right-0 !top-full !z-[9999999] !mt-[4px] !w-full !rounded-lg !border !border-border !bg-background !shadow-lg"
                     onMouseEnter={() => setIsInteractingWithDropdown(true)}
                     onMouseLeave={() => setIsInteractingWithDropdown(false)}
                   >
-                    <div className="[&_*]:!z-[9999999] !p-[16px]">
+                    <div className="!p-[16px] [&_*]:!z-[9999999]">
                       {isAutocompleteLoading ? (
-                        <div className="!flex !items-center !justify-center !py-[12px] !gap-[8px] !text-muted-foreground">
-                          <div className="!w-4 !h-4 !border-2 !border-muted-foreground !border-t-transparent !rounded-full !animate-spin"></div>
+                        <div className="!flex !items-center !justify-center !gap-[8px] !py-[12px] !text-muted-foreground">
+                          <div className="!h-4 !w-4 !animate-spin !rounded-full !border-2 !border-muted-foreground !border-t-transparent"></div>
                           <span>Loading suggestions...</span>
                         </div>
                       ) : autocompleteSuggestions.length > 0 ? (
                         <>
-                          <h3 className="!text-[14px] leading-[6px] !font-medium !text-foreground !mb-[12px]">
+                          <h3 className="!mb-[12px] !text-[14px] !font-medium leading-[6px] !text-foreground">
                             Suggestions
                           </h3>
                           <div className="!space-y-[8px]">
-                            {autocompleteSuggestions.map(
-                              (suggestion, index) => (
-                                <div
-                                  key={index}
-                                  data-suggestion-item="true"
-                                  className={`z-[9999999] !flex !items-center !gap-[8px] !cursor-pointer hover:!bg-muted !p-[8px] !rounded ${
-                                    index === highlightedSuggestionIndex
-                                      ? "!bg-muted"
-                                      : ""
-                                  }`}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    console.log(
-                                      "Desktop suggestion clicked:",
-                                      suggestion,
-                                    );
-                                    console.log(
-                                      "About to call handleSuggestionClick",
-                                    );
-                                    // Prevent click outside from interfering
-                                    e.nativeEvent.stopImmediatePropagation();
-                                    setIsInteractingWithDropdown(false);
-                                    handleSuggestionClick(suggestion);
-                                    console.log(
-                                      "handleSuggestionClick called successfully",
-                                    );
-                                  }}
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    console.log(
-                                      "Desktop suggestion mousedown:",
-                                      suggestion,
-                                    );
-                                    // Prevent click outside from interfering
-                                    e.nativeEvent.stopImmediatePropagation();
-                                  }}
-                                >
-                                  <Search className="!w-[16px] !h-[16px] !text-muted-foreground" />
-                                  <span className="!text-muted-foreground pointer-events-none">
-                                    {suggestion}
-                                  </span>
-                                </div>
-                              ),
-                            )}
+                            {autocompleteSuggestions.map((suggestion, index) => (
+                              <div
+                                key={index}
+                                data-suggestion-item="true"
+                                className={`z-[9999999] !flex !cursor-pointer !items-center !gap-[8px] !rounded !p-[8px] hover:!bg-muted ${
+                                  index === highlightedSuggestionIndex ? "!bg-muted" : ""
+                                }`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  console.log("Desktop suggestion clicked:", suggestion);
+                                  console.log("About to call handleSuggestionClick");
+                                  // Prevent click outside from interfering
+                                  e.nativeEvent.stopImmediatePropagation();
+                                  setIsInteractingWithDropdown(false);
+                                  handleSuggestionClick(suggestion);
+                                  console.log("handleSuggestionClick called successfully");
+                                }}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  console.log("Desktop suggestion mousedown:", suggestion);
+                                  // Prevent click outside from interfering
+                                  e.nativeEvent.stopImmediatePropagation();
+                                }}
+                              >
+                                <Search className="!h-[16px] !w-[16px] !text-muted-foreground" />
+                                <span className="pointer-events-none !text-muted-foreground">
+                                  {suggestion}
+                                </span>
+                              </div>
+                            ))}
                           </div>
                         </>
                       ) : (
-                        <div className="!flex !flex-col !items-center !justify-center !py-6 !text-center !animate-in !fade-in !duration-300">
-                          <div className="!w-10 !h-10 !bg-muted !rounded-full !flex !items-center !justify-center !mb-3 !animate-in !zoom-in !duration-500">
-                            <Search className="!w-5 !h-5 !text-muted-foreground" />
+                        <div className="!flex !flex-col !items-center !justify-center !py-6 !text-center !duration-300 !animate-in !fade-in">
+                          <div className="!mb-3 !flex !h-10 !w-10 !items-center !justify-center !rounded-full !bg-muted !duration-500 !animate-in !zoom-in">
+                            <Search className="!h-5 !w-5 !text-muted-foreground" />
                           </div>
-                          <div className="!animate-in !slide-in-from-bottom-2 !duration-500">
-                            <p className="!text-foreground !font-medium !mb-1 !text-sm">Search not found</p>
-                            <p className="!text-muted-foreground !text-xs">No suggestions found for "{searchQuery}"</p>
+                          <div className="!duration-500 !animate-in !slide-in-from-bottom-2">
+                            <p className="!mb-1 !text-sm !font-medium !text-foreground">
+                              Search not found
+                            </p>
+                            <p className="!text-xs !text-muted-foreground">
+                              No suggestions found for "{searchQuery}"
+                            </p>
                           </div>
                         </div>
                       )}
@@ -1539,14 +1362,14 @@ const KalifindSearch: React.FC<{
       )}
 
       <div
-        className={`!fixed !bottom-[16px] !left-1/2 !-translate-x-1/2 !z-50 ${shouldShowFilters ? "!block lg:!hidden" : "!hidden"}`}
+        className={`!fixed !bottom-[16px] !left-1/2 !z-50 !-translate-x-1/2 ${shouldShowFilters ? "!block lg:!hidden" : "!hidden"}`}
       >
         <Drawer>
           <DrawerTrigger asChild>
-            <button className="!flex !items-center !gap-[8px] !px-[16px] !py-[12px] !bg-primary !text-primary-foreground !rounded-full !font-medium !shadow-lg !hover:!bg-primary-hover !transition-all !duration-300 !transform !hover:!scale-105">
-              <Filter className="!w-[16px] !h-[16px]" />
+            <button className="!hover:!bg-primary-hover !hover:!scale-105 !flex !transform !items-center !gap-[8px] !rounded-full !bg-primary !px-[16px] !py-[12px] !font-medium !text-primary-foreground !shadow-lg !transition-all !duration-300">
+              <Filter className="!h-[16px] !w-[16px]" />
               Filters
-              <span className="!bg-primary-foreground !text-primary !px-[8px] !py-[4px] !rounded-full !text-xs !font-bold">
+              <span className="!rounded-full !bg-primary-foreground !px-[8px] !py-[4px] !text-xs !font-bold !text-primary">
                 {filters.categories.length +
                   filters.colors.length +
                   filters.sizes.length +
@@ -1558,8 +1381,8 @@ const KalifindSearch: React.FC<{
               </span>
             </button>
           </DrawerTrigger>
-          <DrawerContent className="!z-[100000] !flex !flex-col max-h-[93vh]">
-            <div className="!px-[16px] sm:!p-[16px] !overflow-y-auto !flex-1">
+          <DrawerContent className="!z-[100000] !flex max-h-[93vh] !flex-col">
+            <div className="!flex-1 !overflow-y-auto !px-[16px] sm:!p-[16px]">
               <Accordion
                 type="multiple"
                 defaultValue={[
@@ -1576,7 +1399,7 @@ const KalifindSearch: React.FC<{
                 className="!w-full"
               >
                 <AccordionItem value="category">
-                  <AccordionTrigger className="!font-extrabold text-[16px]">
+                  <AccordionTrigger className="text-[16px] !font-extrabold">
                     Categories
                   </AccordionTrigger>
                   <AccordionContent>
@@ -1584,20 +1407,20 @@ const KalifindSearch: React.FC<{
                       {availableCategories.map((category) => (
                         <label
                           key={category}
-                          className="!flex !items-center !justify-between !cursor-pointer !p-[4px] sm:!p-[8px] hover:!bg-muted !rounded-lg"
+                          className="!flex !cursor-pointer !items-center !justify-between !rounded-lg !p-[4px] hover:!bg-muted sm:!p-[8px]"
                         >
                           <div className="!flex !items-center !gap-[12px]">
                             <input
                               type="checkbox"
                               checked={filters.categories.includes(category)}
                               onChange={() => handleCategoryChange(category)}
-                              className="!w-[16px] !h-[16px] sm:!w-5 sm:!h-5 !text-primary !bg-background !border-border !rounded "
+                              className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary sm:!h-5 sm:!w-5 "
                             />
-                            <span className="!text-foreground !text-[14px] sm:!text-[16px] lg:leading-[24px]">
+                            <span className="!text-[14px] !text-foreground sm:!text-[16px] lg:leading-[24px]">
                               {category}
                             </span>
                           </div>
-                          <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !bg-muted !px-[8px] !py-[4px] !rounded">
+                          <span className="!rounded !bg-muted !px-[8px] !py-[4px] !text-[12px] !text-muted-foreground sm:!text-[14px]">
                             {categoryCounts[category] || 0}
                           </span>
                         </label>
@@ -1607,7 +1430,7 @@ const KalifindSearch: React.FC<{
                 </AccordionItem>
                 {showOptionalFilters.brands && (
                   <AccordionItem value="brand">
-                    <AccordionTrigger className="!font-extrabold text-[16px]">
+                    <AccordionTrigger className="text-[16px] !font-extrabold">
                       Brand
                     </AccordionTrigger>
                     <AccordionContent>
@@ -1615,20 +1438,20 @@ const KalifindSearch: React.FC<{
                         {availableBrands.map((brand) => (
                           <label
                             key={brand}
-                            className="!flex !items-center !justify-between !cursor-pointer !p-[4px] sm:!p-[8px] hover:!bg-muted !rounded-lg"
+                            className="!flex !cursor-pointer !items-center !justify-between !rounded-lg !p-[4px] hover:!bg-muted sm:!p-[8px]"
                           >
                             <div className="!flex !items-center !gap-[12px]">
                               <input
                                 type="checkbox"
                                 checked={filters.brands.includes(brand)}
                                 onChange={() => handleBrandChange(brand)}
-                                className="!w-[16px] !h-[16px] sm:!w-5 sm:!h-5 !text-primary !bg-background !border-border !rounded "
+                                className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary sm:!h-5 sm:!w-5 "
                               />
-                              <span className="!text-foreground !text-[14px] sm:!text-[16px] lg:leading-[16px]">
+                              <span className="!text-[14px] !text-foreground sm:!text-[16px] lg:leading-[16px]">
                                 {brand}
                               </span>
                             </div>
-                            <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !bg-muted !px-[8px] !py-[4px] !rounded">
+                            <span className="!rounded !bg-muted !px-[8px] !py-[4px] !text-[12px] !text-muted-foreground sm:!text-[14px]">
                               {brandCounts[brand] || 0}
                             </span>
                           </label>
@@ -1639,7 +1462,7 @@ const KalifindSearch: React.FC<{
                 )}
                 {!isPriceLoading && (
                   <AccordionItem value="price">
-                    <AccordionTrigger className="!font-extrabold text-[16px]">
+                    <AccordionTrigger className="text-[16px] !font-extrabold">
                       <b className="!font-extrabold">Price</b>
                     </AccordionTrigger>
                     <AccordionContent>
@@ -1649,7 +1472,7 @@ const KalifindSearch: React.FC<{
                           onValueChange={(value: number[]) =>
                             setFilters((prev: FilterState) => ({
                               ...prev,
-                              priceRange: [prev.priceRange[0], value[0]],
+                              priceRange: [prev.priceRange[0], value[0] ?? prev.priceRange[1]],
                             }))
                           }
                           max={maxPrice}
@@ -1665,7 +1488,7 @@ const KalifindSearch: React.FC<{
                   </AccordionItem>
                 )}
                 <AccordionItem value="size">
-                  <AccordionTrigger className="!font-extrabold text-[16px]">
+                  <AccordionTrigger className="text-[16px] !font-extrabold">
                     <b className="!font-extrabold">Size</b>
                   </AccordionTrigger>
                   <AccordionContent>
@@ -1674,7 +1497,7 @@ const KalifindSearch: React.FC<{
                         <div
                           key={size}
                           onClick={() => handleSizeChange(size)}
-                          className={`my-border !rounded-lg !py-[8px] !text-[12px] sm:!py-[12px] sm:!text-[14px] !font-medium text-center ${
+                          className={`my-border !rounded-lg !py-[8px] text-center !text-[12px] !font-medium sm:!py-[12px] sm:!text-[14px] ${
                             filters.sizes.includes(size)
                               ? "!bg-primary !text-primary-foreground"
                               : ""
@@ -1688,25 +1511,24 @@ const KalifindSearch: React.FC<{
                 </AccordionItem>
                 {showOptionalFilters.colors && (
                   <AccordionItem value="color">
-                    <AccordionTrigger className="!font-extrabold text-[16px]">
+                    <AccordionTrigger className="text-[16px] !font-extrabold">
                       <b className="!font-extrabold">Color</b>
                     </AccordionTrigger>
                     <AccordionContent>
-                      <div className="!flex !gap-[8px] !flex-wrap !pt-[16px]">
+                      <div className="!flex !flex-wrap !gap-[8px] !pt-[16px]">
                         {availableColors.map((color) => (
                           <button
                             key={color}
                             onClick={() => handleColorChange(color)}
-                            className={`!w-[32px] !h-[32px] sm:!w-[40px] sm:!h-[40px] !rounded-full !border-4 !transition-all ${
+                            aria-label={`Filter by color ${color}`}
+                            title={`Filter by color ${color}`}
+                            className={`!h-[32px] !w-[32px] !rounded-full !border-4 !transition-all sm:!h-[40px] sm:!w-[40px] ${
                               filters.colors.includes(color)
-                                ? "!border-primary !scale-110 !shadow-lg"
+                                ? "!scale-110 !border-primary !shadow-lg"
                                 : "!border-border hover:!border-muted-foreground"
                             }`}
                             style={{
                               backgroundColor: color.toLowerCase(),
-                              transform: filters.colors.includes(color)
-                                ? "scale(1.1)"
-                                : "scale(1)",
                             }}
                           />
                         ))}
@@ -1716,7 +1538,7 @@ const KalifindSearch: React.FC<{
                 )}
                 {showOptionalFilters.tags && (
                   <AccordionItem value="tags">
-                    <AccordionTrigger className="!font-extrabold text-[16px]">
+                    <AccordionTrigger className="text-[16px] !font-extrabold">
                       <b className="!font-extrabold">Tags</b>
                     </AccordionTrigger>
                     <AccordionContent>
@@ -1724,20 +1546,20 @@ const KalifindSearch: React.FC<{
                         {availableTags.map((tag) => (
                           <label
                             key={tag}
-                            className="!flex !items-center !justify-between !cursor-pointer !p-[4px] sm:!p-[8px] hover:!bg-muted !rounded-lg"
+                            className="!flex !cursor-pointer !items-center !justify-between !rounded-lg !p-[4px] hover:!bg-muted sm:!p-[8px]"
                           >
                             <div className="!flex !items-center !gap-[12px]">
                               <input
                                 type="checkbox"
                                 checked={filters.tags.includes(tag)}
                                 onChange={() => handleTagChange(tag)}
-                                className="!w-[16px] !h-[16px] sm:!w-5 sm:!h-5 !text-primary !bg-background !border-border !rounded "
+                                className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary sm:!h-5 sm:!w-5 "
                               />
-                              <span className="!text-foreground !text-[14px] sm:!text-[16px] lg:leading-[16px]">
+                              <span className="!text-[14px] !text-foreground sm:!text-[16px] lg:leading-[16px]">
                                 {tag}
                               </span>
                             </div>
-                            <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !bg-muted !px-[8px] !py-[4px] !rounded">
+                            <span className="!rounded !bg-muted !px-[8px] !py-[4px] !text-[12px] !text-muted-foreground sm:!text-[14px]">
                               {tagCounts[tag] || 0}
                             </span>
                           </label>
@@ -1749,57 +1571,55 @@ const KalifindSearch: React.FC<{
 
                 {/* Mandatory Facets for Mobile */}
                 <AccordionItem value="stockStatus">
-                  <AccordionTrigger className="!font-extrabold text-[16px]">
+                  <AccordionTrigger className="text-[16px] !font-extrabold">
                     <b className="!font-extrabold">Stock Status</b>
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="!space-y-[8px]">
-                      {["In Stock", "Out of Stock", "On Backorder"].map(
-                        (status) => (
-                          <label
-                            key={status}
-                            className="!flex !items-center !justify-between !cursor-pointer !p-[4px] sm:!p-[8px] hover:!bg-muted !rounded-lg"
-                          >
-                            <div className="!flex !items-center !gap-[12px]">
-                              <input
-                                type="checkbox"
-                                checked={filters.stockStatus.includes(status)}
-                                onChange={() => handleStockStatusChange(status)}
-                                className="!w-[16px] !h-[16px] sm:!w-5 sm:!h-5 !text-primary !bg-background !border-border !rounded "
-                              />
-                              <span className="!text-foreground !text-[14px] sm:!text-[16px] lg:leading-[16px]">
-                                {status}
-                              </span>
-                            </div>
-                            <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !bg-muted !px-[8px] !py-[4px] !rounded">
-                              {stockStatusCounts[status] || 0}
+                      {["In Stock", "Out of Stock", "On Backorder"].map((status) => (
+                        <label
+                          key={status}
+                          className="!flex !cursor-pointer !items-center !justify-between !rounded-lg !p-[4px] hover:!bg-muted sm:!p-[8px]"
+                        >
+                          <div className="!flex !items-center !gap-[12px]">
+                            <input
+                              type="checkbox"
+                              checked={filters.stockStatus.includes(status)}
+                              onChange={() => handleStockStatusChange(status)}
+                              className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary sm:!h-5 sm:!w-5 "
+                            />
+                            <span className="!text-[14px] !text-foreground sm:!text-[16px] lg:leading-[16px]">
+                              {status}
                             </span>
-                          </label>
-                        ),
-                      )}
+                          </div>
+                          <span className="!rounded !bg-muted !px-[8px] !py-[4px] !text-[12px] !text-muted-foreground sm:!text-[14px]">
+                            {stockStatusCounts[status] || 0}
+                          </span>
+                        </label>
+                      ))}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
 
                 <AccordionItem value="featured">
-                  <AccordionTrigger className="!font-extrabold text-[16px]">
+                  <AccordionTrigger className="text-[16px] !font-extrabold">
                     <b className="!font-extrabold">Featured Products</b>
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="!space-y-[8px]">
-                      <label className="!flex !items-center !justify-between !cursor-pointer !p-[4px] sm:!p-[8px] hover:!bg-muted !rounded-lg">
+                      <label className="!flex !cursor-pointer !items-center !justify-between !rounded-lg !p-[4px] hover:!bg-muted sm:!p-[8px]">
                         <div className="!flex !items-center !gap-[12px]">
                           <input
                             type="checkbox"
                             checked={filters.featuredProducts}
                             onChange={handleFeaturedProductsChange}
-                            className="!w-[16px] !h-[16px] sm:!w-5 sm:!h-5 !text-primary !bg-background !border-border !rounded "
+                            className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary sm:!h-5 sm:!w-5 "
                           />
-                          <span className="!text-foreground !text-[14px] sm:!text-[16px] lg:leading-[16px]">
+                          <span className="!text-[14px] !text-foreground sm:!text-[16px] lg:leading-[16px]">
                             Featured Only
                           </span>
                         </div>
-                        <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !bg-muted !px-[8px] !py-[4px] !rounded">
+                        <span className="!rounded !bg-muted !px-[8px] !py-[4px] !text-[12px] !text-muted-foreground sm:!text-[14px]">
                           {featuredCount}
                         </span>
                       </label>
@@ -1808,24 +1628,24 @@ const KalifindSearch: React.FC<{
                 </AccordionItem>
 
                 <AccordionItem value="sale">
-                  <AccordionTrigger className="!font-extrabold text-[16px]">
+                  <AccordionTrigger className="text-[16px] !font-extrabold">
                     <b className="!font-extrabold">Sale Status</b>
                   </AccordionTrigger>
                   <AccordionContent>
                     <div className="!space-y-[8px]">
-                      <label className="!flex !items-center !justify-between !cursor-pointer !p-[4px] sm:!p-[8px] hover:!bg-muted !rounded-lg">
+                      <label className="!flex !cursor-pointer !items-center !justify-between !rounded-lg !p-[4px] hover:!bg-muted sm:!p-[8px]">
                         <div className="!flex !items-center !gap-[12px]">
                           <input
                             type="checkbox"
                             checked={filters.saleStatus}
                             onChange={handleSaleStatusChange}
-                            className="!w-[16px] !h-[16px] sm:!w-5 sm:!h-5 !text-primary !bg-background !border-border !rounded "
+                            className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary sm:!h-5 sm:!w-5 "
                           />
-                          <span className="!text-foreground !text-[14px] sm:!text-[16px] lg:leading-[16px]">
+                          <span className="!text-[14px] !text-foreground sm:!text-[16px] lg:leading-[16px]">
                             On Sale Only
                           </span>
                         </div>
-                        <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !bg-muted !px-[8px] !py-[4px] !rounded">
+                        <span className="!rounded !bg-muted !px-[8px] !py-[4px] !text-[12px] !text-muted-foreground sm:!text-[14px]">
                           {saleCount}
                         </span>
                       </label>
@@ -1836,17 +1656,21 @@ const KalifindSearch: React.FC<{
             </div>
 
             <div className="!mt-auto !bg-background">
-              <div className="!flex !items-center !justify-between !p-[12px] !bg-gray-50">
+              <div className="!flex !items-center !justify-between !bg-gray-50 !p-[12px]">
                 <div className="pl-[8px] text-[14px] !text-foreground">
                   <b>{totalProducts}</b> products found
                 </div>
                 <DrawerClose asChild>
-                  <button className="!pr-[4px] hover:!bg-muted !rounded-full !transition-colors">
-                    <X className="!w-[20px] !h-[20px] border bg-[#823BED] rounded-[9999px] !text-white" />
+                  <button
+                    className="!rounded-full !pr-[4px] !transition-colors hover:!bg-muted"
+                    aria-label="Close filters"
+                    title="Close filters"
+                  >
+                    <X className="!h-[20px] !w-[20px] rounded-[9999px] border bg-[#823BED] !text-white" />
                   </button>
                 </DrawerClose>
               </div>
-              <div className="!flex !gap-[8px] !p-[16px] !border-t !border-border">
+              <div className="!flex !gap-[8px] !border-t !border-border !p-[16px]">
                 <button
                   onClick={() => {
                     setFilters({
@@ -1862,12 +1686,12 @@ const KalifindSearch: React.FC<{
                       saleStatus: false,
                     });
                   }}
-                  className="!flex-1 !py-[12px] !border !border-border !text-foreground !rounded-lg !font-medium hover:!bg-muted !transition-colors text-[14px]"
+                  className="!flex-1 !rounded-lg !border !border-border !py-[12px] text-[14px] !font-medium !text-foreground !transition-colors hover:!bg-muted"
                 >
                   Clear All
                 </button>
                 <DrawerClose asChild>
-                  <button className="!flex-1 !py-[12px] !bg-primary !text-primary-foreground !rounded-lg !font-medium hover:!bg-primary-hover !transition-colors text-[14px]">
+                  <button className="!flex-1 !rounded-lg !bg-primary !py-[12px] text-[14px] !font-medium !text-primary-foreground !transition-colors hover:!bg-primary-hover">
                     Apply Filters
                   </button>
                 </DrawerClose>
@@ -1877,9 +1701,9 @@ const KalifindSearch: React.FC<{
         </Drawer>
       </div>
 
-      <div className="!flex !w-full lg:px-[64px] !mx-auto">
+      <div className="!mx-auto !flex !w-full lg:px-[64px]">
         <aside
-          className={`w-80 lg:!w-[312px] !p-[16px] !bg-filter-bg ${shouldShowFilters ? "!hidden lg:!block" : "!hidden"}`}
+          className={`w-80 !bg-filter-bg !p-[16px] lg:!w-[312px] ${shouldShowFilters ? "!hidden lg:!block" : "!hidden"}`}
         >
           <Accordion
             type="multiple"
@@ -1896,7 +1720,7 @@ const KalifindSearch: React.FC<{
             ]}
           >
             <AccordionItem value="category">
-              <AccordionTrigger className="text-[16px] lg:text-[18px] !text-foreground">
+              <AccordionTrigger className="text-[16px] !text-foreground lg:text-[18px]">
                 <b>Category</b>
               </AccordionTrigger>
               <AccordionContent>
@@ -1904,20 +1728,20 @@ const KalifindSearch: React.FC<{
                   {availableCategories.map((category) => (
                     <label
                       key={category}
-                      className="!flex !items-center !justify-between !cursor-pointer"
+                      className="!flex !cursor-pointer !items-center !justify-between"
                     >
                       <div className="!flex !items-center !gap-[10px]">
                         <input
                           type="checkbox"
                           checked={filters.categories.includes(category)}
                           onChange={() => handleCategoryChange(category)}
-                          className="!w-[16px] !h-[16px] lg:!w-5 lg:!h-5 top-0 !text-primary !bg-background !border-border !rounded "
+                          className="top-0 !h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary lg:!h-5 lg:!w-5 "
                         />
-                        <span className="!text-foreground text-[14px] lg:text-[16px]">
+                        <span className="text-[14px] !text-foreground lg:text-[16px]">
                           {category}
                         </span>
                       </div>
-                      <span className="!text-muted-foreground !text-[12px] lg:text-[14px] mr-[8px]">
+                      <span className="mr-[8px] !text-[12px] !text-muted-foreground lg:text-[14px]">
                         {categoryCounts[category] || 0}
                       </span>
                     </label>
@@ -1927,7 +1751,7 @@ const KalifindSearch: React.FC<{
             </AccordionItem>
             {showOptionalFilters.brands && (
               <AccordionItem value="brand">
-                <AccordionTrigger className="text-[16px] lg:text-[18px] !font-extrabold !text-foreground">
+                <AccordionTrigger className="text-[16px] !font-extrabold !text-foreground lg:text-[18px]">
                   <b>Brand</b>
                 </AccordionTrigger>
                 <AccordionContent>
@@ -1935,20 +1759,20 @@ const KalifindSearch: React.FC<{
                     {availableBrands.map((brand) => (
                       <label
                         key={brand}
-                        className="!flex !items-center !justify-between !cursor-pointer"
+                        className="!flex !cursor-pointer !items-center !justify-between"
                       >
                         <div className="!flex !items-center !gap-[8px]">
                           <input
                             type="checkbox"
                             checked={filters.brands.includes(brand)}
                             onChange={() => handleBrandChange(brand)}
-                            className="!w-[16px] !h-[16px] lg:!w-5 lg:!h-5 !text-primary !bg-background !border-border !rounded "
+                            className="!h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary lg:!h-5 lg:!w-5 "
                           />
-                          <span className="!text-foreground text-[14px] lg:text-[16px]">
+                          <span className="text-[14px] !text-foreground lg:text-[16px]">
                             {brand}
                           </span>
                         </div>
-                        <span className="!text-muted-foreground !text-[12px] lg:text-[14px] mr-[8px]">
+                        <span className="mr-[8px] !text-[12px] !text-muted-foreground lg:text-[14px]">
                           {brandCounts[brand] || 0}
                         </span>
                       </label>
@@ -1959,7 +1783,7 @@ const KalifindSearch: React.FC<{
             )}
             {!isPriceLoading && (
               <AccordionItem value="price">
-                <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[800] !text-foreground">
+                <AccordionTrigger className="text-[16px] !font-[800] !text-foreground lg:text-[18px]">
                   <b className="font-extrabold">Price</b>
                 </AccordionTrigger>
                 <AccordionContent>
@@ -1968,14 +1792,14 @@ const KalifindSearch: React.FC<{
                     onValueChange={(value) =>
                       setFilters((prev) => ({
                         ...prev,
-                        priceRange: [prev.priceRange[0], value[0]],
+                        priceRange: [prev.priceRange[0], value[0] ?? prev.priceRange[1]],
                       }))
                     }
                     max={maxPrice}
                     step={10}
-                    className="!w-full !mb-[16px] !mt-[8px]"
+                    className="!mb-[16px] !mt-[8px] !w-full"
                   />
-                  <div className="!flex !justify-between !text-[12px] lg:text-[14px] !text-muted-foreground">
+                  <div className="!flex !justify-between !text-[12px] !text-muted-foreground lg:text-[14px]">
                     <span>{filters.priceRange[0]} €</span>
                     <span>{filters.priceRange[1]} €</span>
                   </div>
@@ -1983,7 +1807,7 @@ const KalifindSearch: React.FC<{
               </AccordionItem>
             )}
             <AccordionItem value="size">
-              <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[700] !text-foreground">
+              <AccordionTrigger className="text-[16px] !font-[700] !text-foreground lg:text-[18px]">
                 <b className="font-extrabold">Size</b>
               </AccordionTrigger>
               <AccordionContent>
@@ -1992,10 +1816,8 @@ const KalifindSearch: React.FC<{
                     <button
                       key={size}
                       onClick={() => handleSizeChange(size)}
-                      className={`my-border !rounded !py-[8px] !text-[12px] lg:text-[14px] !font-medium ${
-                        filters.sizes.includes(size)
-                          ? "!bg-primary !text-primary-foreground"
-                          : ""
+                      className={`my-border !rounded !py-[8px] !text-[12px] !font-medium lg:text-[14px] ${
+                        filters.sizes.includes(size) ? "!bg-primary !text-primary-foreground" : ""
                       }`}
                     >
                       {size}
@@ -2006,7 +1828,7 @@ const KalifindSearch: React.FC<{
             </AccordionItem>
             {showOptionalFilters.colors && (
               <AccordionItem value="color">
-                <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[700] !text-foreground">
+                <AccordionTrigger className="text-[16px] !font-[700] !text-foreground lg:text-[18px]">
                   <b className="font-extrabold">Color</b>
                 </AccordionTrigger>
                 <AccordionContent>
@@ -2015,16 +1837,15 @@ const KalifindSearch: React.FC<{
                       <button
                         key={color}
                         onClick={() => handleColorChange(color)}
-                        className={`!w-[24px] !h-[24px] lg:!w-[32px] lg:!h-[32px] !rounded-full !border-2 ${
+                        aria-label={`Filter by color ${color}`}
+                        title={`Filter by color ${color}`}
+                        className={`!h-[24px] !w-[24px] !rounded-full !border-2 lg:!h-[32px] lg:!w-[32px] ${
                           filters.colors.includes(color)
-                            ? "!border-primary !scale-110"
+                            ? "!scale-110 !border-primary"
                             : "!border-border"
                         }`}
                         style={{
                           backgroundColor: color.toLowerCase(),
-                          transform: filters.colors.includes(color)
-                            ? "scale(1.1)"
-                            : "scale(1)",
                         }}
                       />
                     ))}
@@ -2034,7 +1855,7 @@ const KalifindSearch: React.FC<{
             )}
             {showOptionalFilters.tags && (
               <AccordionItem value="tags">
-                <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[700] !text-foreground">
+                <AccordionTrigger className="text-[16px] !font-[700] !text-foreground lg:text-[18px]">
                   <b className="font-extrabold">Tags</b>
                 </AccordionTrigger>
                 <AccordionContent>
@@ -2042,20 +1863,18 @@ const KalifindSearch: React.FC<{
                     {availableTags.map((tag) => (
                       <label
                         key={tag}
-                        className="!flex !items-center !justify-between !cursor-pointer"
+                        className="!flex !cursor-pointer !items-center !justify-between"
                       >
                         <div className="!flex !items-center !gap-[10px]">
                           <input
                             type="checkbox"
                             checked={filters.tags.includes(tag)}
                             onChange={() => handleTagChange(tag)}
-                            className="!w-[16px] !h-[16px] lg:!w-5 lg:!h-5 top-0 !text-primary !bg-background !border-border !rounded "
+                            className="top-0 !h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary lg:!h-5 lg:!w-5 "
                           />
-                          <span className="!text-foreground text-[14px] lg:text-[16px]">
-                            {tag}
-                          </span>
+                          <span className="text-[14px] !text-foreground lg:text-[16px]">{tag}</span>
                         </div>
-                        <span className="!text-muted-foreground !text-[12px] lg:text-[14px] mr-[8px]">
+                        <span className="mr-[8px] !text-[12px] !text-muted-foreground lg:text-[14px]">
                           {tagCounts[tag] || 0}
                         </span>
                       </label>
@@ -2067,57 +1886,55 @@ const KalifindSearch: React.FC<{
 
             {/* Mandatory Facets */}
             <AccordionItem value="stockStatus">
-              <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[700] !text-foreground">
+              <AccordionTrigger className="text-[16px] !font-[700] !text-foreground lg:text-[18px]">
                 <b className="font-extrabold">Stock Status</b>
               </AccordionTrigger>
               <AccordionContent>
                 <div className="!space-y-[8px]">
-                  {["In Stock", "Out of Stock", "On Backorder"].map(
-                    (status) => (
-                      <label
-                        key={status}
-                        className="!flex !items-center !justify-between !cursor-pointer"
-                      >
-                        <div className="!flex !items-center !gap-[10px]">
-                          <input
-                            type="checkbox"
-                            checked={filters.stockStatus.includes(status)}
-                            onChange={() => handleStockStatusChange(status)}
-                            className="!w-[16px] !h-[16px] lg:!w-5 lg:!h-5 top-0 !text-primary !bg-background !border-border !rounded "
-                          />
-                          <span className="!text-foreground text-[14px] lg:text-[16px]">
-                            {status}
-                          </span>
-                        </div>
-                        <span className="!text-muted-foreground !text-[12px] lg:text-[14px] mr-[8px]">
-                          {stockStatusCounts[status] || 0}
+                  {["In Stock", "Out of Stock", "On Backorder"].map((status) => (
+                    <label
+                      key={status}
+                      className="!flex !cursor-pointer !items-center !justify-between"
+                    >
+                      <div className="!flex !items-center !gap-[10px]">
+                        <input
+                          type="checkbox"
+                          checked={filters.stockStatus.includes(status)}
+                          onChange={() => handleStockStatusChange(status)}
+                          className="top-0 !h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary lg:!h-5 lg:!w-5 "
+                        />
+                        <span className="text-[14px] !text-foreground lg:text-[16px]">
+                          {status}
                         </span>
-                      </label>
-                    ),
-                  )}
+                      </div>
+                      <span className="mr-[8px] !text-[12px] !text-muted-foreground lg:text-[14px]">
+                        {stockStatusCounts[status] || 0}
+                      </span>
+                    </label>
+                  ))}
                 </div>
               </AccordionContent>
             </AccordionItem>
 
             <AccordionItem value="featured">
-              <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[700] !text-foreground">
+              <AccordionTrigger className="text-[16px] !font-[700] !text-foreground lg:text-[18px]">
                 <b className="font-extrabold">Featured Products</b>
               </AccordionTrigger>
               <AccordionContent>
                 <div className="!space-y-[8px]">
-                  <label className="!flex !items-center !justify-between !cursor-pointer">
+                  <label className="!flex !cursor-pointer !items-center !justify-between">
                     <div className="!flex !items-center !gap-[10px]">
                       <input
                         type="checkbox"
                         checked={filters.featuredProducts}
                         onChange={handleFeaturedProductsChange}
-                        className="!w-[16px] !h-[16px] lg:!w-5 lg:!h-5 top-0 !text-primary !bg-background !border-border !rounded "
+                        className="top-0 !h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary lg:!h-5 lg:!w-5 "
                       />
-                      <span className="!text-foreground text-[14px] lg:text-[16px]">
+                      <span className="text-[14px] !text-foreground lg:text-[16px]">
                         Featured Only
                       </span>
                     </div>
-                    <span className="!text-muted-foreground !text-[12px] lg:text-[14px] mr-[8px]">
+                    <span className="mr-[8px] !text-[12px] !text-muted-foreground lg:text-[14px]">
                       {featuredCount}
                     </span>
                   </label>
@@ -2126,24 +1943,24 @@ const KalifindSearch: React.FC<{
             </AccordionItem>
 
             <AccordionItem value="sale">
-              <AccordionTrigger className="text-[16px] lg:text-[18px] !font-[700] !text-foreground">
+              <AccordionTrigger className="text-[16px] !font-[700] !text-foreground lg:text-[18px]">
                 <b className="font-extrabold">Sale Status</b>
               </AccordionTrigger>
               <AccordionContent>
                 <div className="!space-y-[8px]">
-                  <label className="!flex !items-center !justify-between !cursor-pointer">
+                  <label className="!flex !cursor-pointer !items-center !justify-between">
                     <div className="!flex !items-center !gap-[10px]">
                       <input
                         type="checkbox"
                         checked={filters.saleStatus}
                         onChange={handleSaleStatusChange}
-                        className="!w-[16px] !h-[16px] lg:!w-5 lg:!h-5 top-0 !text-primary !bg-background !border-border !rounded "
+                        className="top-0 !h-[16px] !w-[16px] !rounded !border-border !bg-background !text-primary lg:!h-5 lg:!w-5 "
                       />
-                      <span className="!text-foreground text-[14px] lg:text-[16px]">
+                      <span className="text-[14px] !text-foreground lg:text-[16px]">
                         On Sale Only
                       </span>
                     </div>
-                    <span className="!text-muted-foreground !text-[12px] lg:text-[14px] mr-[8px]">
+                    <span className="mr-[8px] !text-[12px] !text-muted-foreground lg:text-[14px]">
                       {saleCount}
                     </span>
                   </label>
@@ -2154,7 +1971,7 @@ const KalifindSearch: React.FC<{
           {isAnyFilterActive && (
             <Button
               size="lg"
-              className="w-full mt-[16px] text-[14px] lg:text-[16px] py-[16px] !border-search-highlight font-bold rounded-lg"
+              className="mt-[16px] w-full rounded-lg !border-search-highlight py-[16px] text-[14px] font-bold lg:text-[16px]"
               onClick={() => {
                 setFilters({
                   categories: [],
@@ -2175,14 +1992,12 @@ const KalifindSearch: React.FC<{
           )}
         </aside>
 
-        <main className="!flex-1 pb-[16px] sm:pb-[32px] !w-full !px-[8px] sm:!px-[16px]">
-          <div className="!pr-[16px] sm:!pr-[32px] lg:pr-0 !w-full">
+        <main className="!w-full !flex-1 !px-[8px] pb-[16px] sm:!px-[16px] sm:pb-[32px]">
+          <div className="!w-full !pr-[16px] sm:!pr-[32px] lg:pr-0">
             {recentSearches.length > 0 && (
               <div className="!mt-8">
-                <div className="!flex !justify-between !items-center !mb-[12px]">
-                  <h3 className="!text-[16px] !font-bold !text-foreground">
-                    Recent Searches
-                  </h3>
+                <div className="!mb-[12px] !flex !items-center !justify-between">
+                  <h3 className="!text-[16px] !font-bold !text-foreground">Recent Searches</h3>
                   <button
                     onClick={handleClearRecentSearches}
                     className="!text-sm !text-muted-foreground hover:!text-foreground"
@@ -2194,10 +2009,10 @@ const KalifindSearch: React.FC<{
                   {recentSearches.map((search, index) => (
                     <div
                       key={index}
-                      className="!flex !items-center !gap-[4px] !bg-muted !rounded-full !px-[12px] !py-[6px]"
+                      className="!flex !items-center !gap-[4px] !rounded-full !bg-muted !px-[12px] !py-[6px]"
                     >
                       <span
-                        className="!text-sm !text-foreground !cursor-pointer"
+                        className="!cursor-pointer !text-sm !text-foreground"
                         onClick={() => {
                           handleSearch(search);
                         }}
@@ -2209,9 +2024,11 @@ const KalifindSearch: React.FC<{
                           e.stopPropagation();
                           handleRemoveRecentSearch(search);
                         }}
-                        className="!rounded-full hover:!bg-background !p-1"
+                        aria-label={`Remove recent search ${search}`}
+                        title={`Remove recent search ${search}`}
+                        className="!rounded-full !p-1 hover:!bg-background"
                       >
-                        <X className="!w-[12px] !h-[12px] !text-muted-foreground" />
+                        <X className="!h-[12px] !w-[12px] !text-muted-foreground" />
                       </button>
                     </div>
                   ))}
@@ -2219,29 +2036,23 @@ const KalifindSearch: React.FC<{
               </div>
             )}
             {!showRecommendations && (
-              <div className="hidden lg:flex pt-[22px] pb-[4px]  !text-[14px] sm:!text-[16px] lg:text-[18px] !font-bold !text-foreground !mb-[8px] mt-[8px]">
+              <div className="!mb-[8px] mt-[8px] hidden pb-[4px]  pt-[22px] !text-[14px] !font-bold !text-foreground sm:!text-[16px] lg:flex lg:text-[18px]">
                 {/* {isAnyFilterActive ? "Search Results" : ""} */}
                 Search Results
               </div>
             )}
             {!showRecommendations && (
-              <div className="pt-[16px] lg:pt-[0px] !mb-[16px] flex justify-between items-center text-[12px] lg:text-[16px] !text-muted-foreground">
+              <div className="!mb-[16px] flex items-center justify-between pt-[16px] text-[12px] !text-muted-foreground lg:pt-[0px] lg:text-[16px]">
                 <div className="!ml-[8px]">
-                  <b className="!font-extrabold text-foreground">
-                    {displayedProducts}
-                  </b>{" "}
-                  out of{" "}
-                  <b className="!font-extrabold text-foreground">
-                    {totalProducts}
-                  </b>{" "}
-                  products
+                  <b className="!font-extrabold text-foreground">{displayedProducts}</b> out of{" "}
+                  <b className="!font-extrabold text-foreground">{totalProducts}</b> products
                 </div>
                 <div onClick={(e) => e.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger>
-                      <div className="!flex !items-center !border !border-border !px-[8px] !py-[4px] md:!px-[12px] md:!py-[8px] !rounded-md text-[12px] lg:text-[14px]">
+                      <div className="!flex !items-center !rounded-md !border !border-border !px-[8px] !py-[4px] text-[12px] md:!px-[12px] md:!py-[8px] lg:text-[14px]">
                         Sort By
-                        <ChevronDown className="!w-[12px] !h-[12px] md:!w-[16px] md:!h-[16px] !ml-[4px] md:!ml-[8px]" />
+                        <ChevronDown className="!ml-[4px] !h-[12px] !w-[12px] md:!ml-[8px] md:!h-[16px] md:!w-[16px]" />
                       </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent
@@ -2249,7 +2060,7 @@ const KalifindSearch: React.FC<{
                       className="z-[100000]"
                       container={document.body}
                     >
-                      <DropdownMenuLabel className="!font-semibold text-[14px]">
+                      <DropdownMenuLabel className="text-[14px] !font-semibold">
                         Sort by
                       </DropdownMenuLabel>
                       <DropdownMenuSeparator />
@@ -2309,10 +2120,10 @@ const KalifindSearch: React.FC<{
               <div className="!w-full">
                 {/* Popular Searches */}
                 <div className="!mb-8">
-                  <h3 className="!text-[18px] lg:!text-[20px] !font-bold !text-foreground !mb-[8px] !mt-[8px]">
+                  <h3 className="!mb-[8px] !mt-[8px] !text-[18px] !font-bold !text-foreground lg:!text-[20px]">
                     Popular Searches
                   </h3>
-                  <p className="!text-[14px] !text-muted-foreground !mb-4">
+                  <p className="!mb-4 !text-[14px] !text-muted-foreground">
                     Trending search terms from other customers
                   </p>
                   <div className="!flex !flex-wrap !gap-2">
@@ -2320,10 +2131,10 @@ const KalifindSearch: React.FC<{
                       <button
                         key={term}
                         onClick={() => handlePopularSearchClick(term)}
-                        className="!bg-muted hover:!bg-primary hover:!text-primary-foreground !text-foreground !px-4 !py-2 !rounded-full !text-[14px] !font-medium !transition-all !duration-300 !transform hover:!scale-105 !capitalize !border !border-transparent hover:!border-primary"
+                        className="!transform !rounded-full !border !border-transparent !bg-muted !px-4 !py-2 !text-[14px] !font-medium !capitalize !text-foreground !transition-all !duration-300 hover:!scale-105 hover:!border-primary hover:!bg-primary hover:!text-primary-foreground"
                       >
                         <span className="!flex !items-center !gap-2">
-                          <span className="!text-xs !bg-primary/20 !text-primary !px-2 !py-1 !rounded-full">
+                          <span className="!rounded-full !bg-primary/20 !px-2 !py-1 !text-xs !text-primary">
                             #{index + 1}
                           </span>
                           {term}
@@ -2348,18 +2159,18 @@ const KalifindSearch: React.FC<{
               <LoadingSkeleton />
             ) : (
               <>
-                <div className="!grid !grid-cols-2 sm:!grid-cols-2 xl:grid-cols-3 2xl:!grid-cols-4 !gap-[8px] sm:!gap-[16px] !w-full">
+                <div className="!grid !w-full !grid-cols-2 !gap-[8px] sm:!grid-cols-2 sm:!gap-[16px] xl:grid-cols-3 2xl:!grid-cols-4">
                   {sortedProducts.map((product) => (
                     <div
                       key={product.id}
                       onClick={() => handleProductClick(product)}
-                      className="!bg-background !border !border-border !rounded-lg !p-[8px] sm:!p-[12px] hover:!shadow-lg !transition-shadow !w-full !flex !flex-col group !cursor-pointer"
+                      className="group !flex !w-full !cursor-pointer !flex-col !rounded-lg !border !border-border !bg-background !p-[8px] !transition-shadow hover:!shadow-lg sm:!p-[12px]"
                     >
                       <div className="!relative !mb-[8px] overflow-hidden">
                         <img
                           src={product.imageUrl || product.image}
                           alt={product.title}
-                          className="!w-full !h-[112px] sm:!h-[144px] !object-cover !rounded-md group-hover:!scale-105 !transition-transform !duration-300"
+                          className="!h-[112px] !w-full !rounded-md !object-cover !transition-transform !duration-300 group-hover:!scale-105 sm:!h-[144px]"
                           loading="lazy"
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
@@ -2368,7 +2179,7 @@ const KalifindSearch: React.FC<{
                           }}
                         />
                         {product.featured && (
-                          <div className="!absolute !top-2 !right-2 !bg-primary !text-primary-foreground !px-2 !py-1 !rounded-full !text-xs !font-bold">
+                          <div className="!absolute !right-2 !top-2 !rounded-full !bg-primary !px-2 !py-1 !text-xs !font-bold !text-primary-foreground">
                             Featured
                           </div>
                         )}
@@ -2379,26 +2190,25 @@ const KalifindSearch: React.FC<{
                           product.regularPrice &&
                           product.salePrice !== product.regularPrice &&
                           (() => {
-                            const discountPercentage =
-                              calculateDiscountPercentage(
-                                product.regularPrice,
-                                product.salePrice,
-                              );
+                            const discountPercentage = calculateDiscountPercentage(
+                              product.regularPrice,
+                              product.salePrice
+                            );
                             return discountPercentage ? (
-                              <div className="!absolute !top-2 !left-2 !bg-red-500 !text-white !px-2 !py-1 !rounded-full !text-xs !font-bold">
+                              <div className="!absolute !left-2 !top-2 !rounded-full !bg-red-500 !px-2 !py-1 !text-xs !font-bold !text-white">
                                 -{discountPercentage}%
                               </div>
                             ) : (
-                              <div className="!absolute !top-2 !left-2 !bg-red-500 !text-white !px-2 !py-1 !rounded-full !text-xs !font-bold">
+                              <div className="!absolute !left-2 !top-2 !rounded-full !bg-red-500 !px-2 !py-1 !text-xs !font-bold !text-white">
                                 Sale
                               </div>
                             );
                           })()}
                       </div>
-                      <h3 className="!text-[14px] sm:!text-[16px] !font-bold !text-foreground !mb-[4px] sm:!mb-[8px] h-[40px] sm:h-[48px] overflow-hidden">
+                      <h3 className="!mb-[4px] h-[40px] overflow-hidden !text-[14px] !font-bold !text-foreground sm:!mb-[8px] sm:h-[48px] sm:!text-[16px]">
                         {product.title}
                       </h3>
-                      <div className="!flex !items-center !justify-between mt-auto">
+                      <div className="mt-auto !flex !items-center !justify-between">
                         <div className="!flex !items-center !gap-[8px]">
                           {product.salePrice &&
                           product.salePrice !== "" &&
@@ -2407,15 +2217,15 @@ const KalifindSearch: React.FC<{
                           product.regularPrice &&
                           product.salePrice !== product.regularPrice ? (
                             <div className="!flex !items-center !gap-2">
-                              <span className="!text-primary !text-[14px] sm:!text-[16px] !font-bold">
+                              <span className="!text-[14px] !font-bold !text-primary sm:!text-[16px]">
                                 {product.salePrice}
                               </span>
-                              <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !line-through">
+                              <span className="!text-[12px] !text-muted-foreground !line-through sm:!text-[14px]">
                                 {product.regularPrice}
                               </span>
                             </div>
                           ) : (
-                            <span className="!text-muted-foreground !text-[12px] sm:!text-[14px]">
+                            <span className="!text-[12px] !text-muted-foreground sm:!text-[14px]">
                               {product.price}
                             </span>
                           )}
@@ -2426,12 +2236,12 @@ const KalifindSearch: React.FC<{
                             handleAddToCart(product);
                           }}
                           disabled={addingToCart === product.id}
-                          className="!bg-primary hover:!bg-primary-hover !text-primary-foreground !p-[6px] sm:!p-[8px] !rounded-md !transition-colors group-hover:!scale-110 !transform !duration-200 disabled:!opacity-50 disabled:!cursor-not-allowed"
+                          className="!transform !rounded-md !bg-primary !p-[6px] !text-primary-foreground !transition-colors !duration-200 hover:!bg-primary-hover disabled:!cursor-not-allowed disabled:!opacity-50 group-hover:!scale-110 sm:!p-[8px]"
                         >
                           {addingToCart === product.id ? (
-                            <div className="!w-[12px] !h-[12px] sm:!w-[16px] sm:!h-[16px] !border-2 !border-primary-foreground !border-t-transparent !rounded-full !animate-spin"></div>
+                            <div className="!h-[12px] !w-[12px] !animate-spin !rounded-full !border-2 !border-primary-foreground !border-t-transparent sm:!h-[16px] sm:!w-[16px]"></div>
                           ) : (
-                            <ShoppingCart className="!w-[12px] !h-[12px] sm:!w-[16px] sm:!h-[16px]" />
+                            <ShoppingCart className="!h-[12px] !w-[12px] sm:!h-[16px] sm:!w-[16px]" />
                           )}
                         </button>
                       </div>
@@ -2441,28 +2251,18 @@ const KalifindSearch: React.FC<{
 
                 {/* Infinite scroll trigger for mobile */}
                 {isMobile && hasMoreProducts && (
-                  <div id="load-more-trigger" className="!w-full !h-4 !my-4">
+                  <div id="load-more-trigger" className="!my-4 !h-4 !w-full">
                     {isLoadingMore && (
-                      <div className="!flex !justify-center !items-center !py-4">
+                      <div className="!flex !items-center !justify-center !py-4">
                         <div className="!flex !items-center !gap-2">
                           <div className="!flex !space-x-2">
-                            <div
-                              className="!w-2 !h-2 !bg-primary !rounded-full !animate-bounce"
-                              style={{ animationDelay: "0ms" }}
-                            ></div>
-                            <div
-                              className="!w-2 !h-2 !bg-primary !rounded-full !animate-bounce"
-                              style={{ animationDelay: "150ms" }}
-                            ></div>
-                            <div
-                              className="!w-2 !h-2 !bg-primary !rounded-full !animate-bounce"
-                              style={{ animationDelay: "300ms" }}
-                            ></div>
+                            <div className="animate-bounce-delay-0 !h-2 !w-2 !animate-bounce !rounded-full !bg-primary"></div>
+                            <div className="animate-bounce-delay-150 !h-2 !w-2 !animate-bounce !rounded-full !bg-primary"></div>
+                            <div className="animate-bounce-delay-300 !h-2 !w-2 !animate-bounce !rounded-full !bg-primary"></div>
                           </div>
                           <span className="!text-sm !text-muted-foreground">
-                            Loading{" "}
-                            {Math.min(12, totalProducts - displayedProducts)}{" "}
-                            more products...
+                            Loading {Math.min(12, totalProducts - displayedProducts)} more
+                            products...
                           </span>
                         </div>
                       </div>
@@ -2472,11 +2272,11 @@ const KalifindSearch: React.FC<{
 
                 {/* Load More button for desktop */}
                 {!isMobile && hasMoreProducts && (
-                  <div className="!flex !justify-center !mt-8">
+                  <div className="!mt-8 !flex !justify-center">
                     <button
                       onClick={loadMoreProducts}
                       disabled={isLoadingMore}
-                      className="!bg-primary hover:!bg-primary-hover !text-primary-foreground !px-8 !py-3 !rounded-lg !font-medium !transition-colors !disabled:opacity-50 !disabled:cursor-not-allowed"
+                      className="!disabled:opacity-50 !disabled:cursor-not-allowed !rounded-lg !bg-primary !px-8 !py-3 !font-medium !text-primary-foreground !transition-colors hover:!bg-primary-hover"
                     >
                       {isLoadingMore
                         ? "Loading..."
@@ -2487,32 +2287,30 @@ const KalifindSearch: React.FC<{
               </>
             )}
 
-            {!isLoading &&
-              !isPending &&
-              !showRecommendations &&
-              sortedProducts.length === 0 && (
-                <div className="!text-center !py-[48px] !w-full !animate-in !fade-in !duration-300">
-                  <div className="!flex !flex-col !items-center !gap-4">
-                    <div className="!w-16 !h-16 !bg-muted !rounded-full !flex !items-center !justify-center !animate-in !zoom-in !duration-500">
-                      <Search className="!w-8 !h-8 !text-muted-foreground" />
-                    </div>
-                    <div className="!animate-in !slide-in-from-bottom-2 !duration-500">
-                      <p className="!text-foreground !text-[18px] !lg:text-[20px] !font-semibold !mb-2">
-                        Search not found
-                      </p>
-                      <p className="!text-muted-foreground !text-[14px] !lg:text-[16px]">
-                        No products found matching your criteria. Try different keywords or browse our categories.
-                      </p>
-                    </div>
+            {!isLoading && !isPending && !showRecommendations && sortedProducts.length === 0 && (
+              <div className="!w-full !py-[48px] !text-center !duration-300 !animate-in !fade-in">
+                <div className="!flex !flex-col !items-center !gap-4">
+                  <div className="!flex !h-16 !w-16 !items-center !justify-center !rounded-full !bg-muted !duration-500 !animate-in !zoom-in">
+                    <Search className="!h-8 !w-8 !text-muted-foreground" />
+                  </div>
+                  <div className="!duration-500 !animate-in !slide-in-from-bottom-2">
+                    <p className="!lg:text-[20px] !mb-2 !text-[18px] !font-semibold !text-foreground">
+                      Search not found
+                    </p>
+                    <p className="!lg:text-[16px] !text-[14px] !text-muted-foreground">
+                      No products found matching your criteria. Try different keywords or browse our
+                      categories.
+                    </p>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
             {/* Cart Message Display */}
             {cartMessage && (
-              <div className="!fixed !top-4 !right-4 !z-[999999] !bg-primary !text-primary-foreground !px-4 !py-2 !rounded-lg !shadow-lg !max-w-sm">
+              <div className="!fixed !right-4 !top-4 !z-[999999] !max-w-sm !rounded-lg !bg-primary !px-4 !py-2 !text-primary-foreground !shadow-lg">
                 <div className="!flex !items-center !gap-2">
-                  <div className="!w-4 !h-4 !border-2 !border-primary-foreground !border-t-transparent !rounded-full !animate-spin"></div>
+                  <div className="!h-4 !w-4 !animate-spin !rounded-full !border-2 !border-primary-foreground !border-t-transparent"></div>
                   <span className="!text-sm !font-medium">{cartMessage}</span>
                 </div>
               </div>

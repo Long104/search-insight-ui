@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { ChevronUp } from "lucide-react";
 
 interface ScrollToTopProps {
@@ -17,10 +17,8 @@ const ScrollToTop: React.FC<ScrollToTopProps> = ({
   useEffect(() => {
     const container = containerRef?.current;
     const toggleVisibility = () => {
-      const scrollTop = container 
-        ? container.scrollTop 
-        : window.pageYOffset;
-        
+      const scrollTop = container ? container.scrollTop : window.pageYOffset;
+
       setIsVisible(scrollTop > showAfter);
     };
 
@@ -62,18 +60,18 @@ const ScrollToTop: React.FC<ScrollToTopProps> = ({
       onClick={scrollToTop}
       className={`
         !fixed !bottom-6 !right-6 !z-[1000] 
-        !w-12 !h-12 !bg-primary !text-primary-foreground 
-        !rounded-full !shadow-lg hover:!shadow-xl 
-        !transition-all !duration-300 !ease-in-out
-        hover:!scale-110 active:!scale-95
-        !flex !items-center !justify-center
-        ${isVisible ? "!opacity-100 !translate-y-0" : "!opacity-0 !translate-y-4 !pointer-events-none"}
+        !flex !h-12 !w-12 !items-center 
+        !justify-center !rounded-full !bg-primary 
+        !text-primary-foreground !shadow-lg !transition-all
+        !duration-300 !ease-in-out
+        hover:!scale-110 hover:!shadow-xl active:!scale-95
+        ${isVisible ? "!translate-y-0 !opacity-100" : "!pointer-events-none !translate-y-4 !opacity-0"}
         ${className}
       `}
       aria-label="Scroll to top"
       title="Back to top"
     >
-      <ChevronUp className="!w-6 !h-6" />
+      <ChevronUp className="!h-6 !w-6" />
     </button>
   );
 };

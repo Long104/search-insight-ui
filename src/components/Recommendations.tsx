@@ -1,7 +1,6 @@
-
-import React from 'react';
-import { Product } from '../types';
-import { ShoppingCart } from 'lucide-react';
+import { ShoppingCart } from "lucide-react";
+import React from "react";
+import { Product } from "../types";
 
 interface RecommendationsProps {
   recommendations: Product[];
@@ -20,8 +19,8 @@ const Recommendations: React.FC<RecommendationsProps> = ({
 }) => {
   if (recommendations.length === 0) {
     return (
-      <div className="!text-center !py-[48px] !w-full">
-        <p className="!text-muted-foreground text-[16px] lg:text-[18px]">
+      <div className="!w-full !py-[48px] !text-center">
+        <p className="text-[16px] !text-muted-foreground lg:text-[18px]">
           Loading recommendations...
         </p>
       </div>
@@ -30,24 +29,24 @@ const Recommendations: React.FC<RecommendationsProps> = ({
 
   return (
     <div className="!mb-8">
-      <h3 className="!text-[18px] lg:!text-[20px] !font-bold !text-foreground !mb-4">
+      <h3 className="!mb-4 !text-[18px] !font-bold !text-foreground lg:!text-[20px]">
         Recommendations
       </h3>
-      <div className="!grid !grid-cols-2 sm:!grid-cols-2 xl:grid-cols-3 2xl:!grid-cols-4 !gap-[8px] sm:!gap-[16px] !w-full">
+      <div className="!grid !w-full !grid-cols-2 !gap-[8px] sm:!grid-cols-2 sm:!gap-[16px] xl:grid-cols-3 2xl:!grid-cols-4">
         {recommendations.map((product) => (
           <div
             key={product.id}
             onClick={() => handleProductClick(product)}
-            className="!bg-background !border !border-border !rounded-lg !p-[8px] sm:!p-[12px] hover:!shadow-lg !transition-shadow !w-full !flex !flex-col group !cursor-pointer"
+            className="group !flex !w-full !cursor-pointer !flex-col !rounded-lg !border !border-border !bg-background !p-[8px] !transition-shadow hover:!shadow-lg sm:!p-[12px]"
           >
             <div className="!relative !mb-[8px] overflow-hidden">
               <img
-                src={product.imageUrl || product.image}
+                src={product.imageUrl ?? product.image}
                 alt={product.title}
-                className="!w-full !h-[112px] sm:!h-[144px] !object-cover !rounded-md group-hover:!scale-105 !transition-transform !duration-300"
+                className="!h-[112px] !w-full !rounded-md !object-cover !transition-transform !duration-300 group-hover:!scale-105 sm:!h-[144px]"
               />
               {product.featured && (
-                <div className="!absolute !top-2 !right-2 !bg-primary !text-primary-foreground !px-2 !py-1 !rounded-full !text-xs !font-bold">
+                <div className="!absolute !right-2 !top-2 !rounded-full !bg-primary !px-2 !py-1 !text-xs !font-bold !text-primary-foreground">
                   Featured
                 </div>
               )}
@@ -58,26 +57,25 @@ const Recommendations: React.FC<RecommendationsProps> = ({
                 product.regularPrice &&
                 product.salePrice !== product.regularPrice &&
                 (() => {
-                  const discountPercentage =
-                    calculateDiscountPercentage(
-                      product.regularPrice,
-                      product.salePrice,
-                    );
+                  const discountPercentage = calculateDiscountPercentage(
+                    product.regularPrice,
+                    product.salePrice
+                  );
                   return discountPercentage ? (
-                    <div className="!absolute !top-2 !left-2 !bg-red-500 !text-white !px-2 !py-1 !rounded-full !text-xs !font-bold">
+                    <div className="!absolute !left-2 !top-2 !rounded-full !bg-red-500 !px-2 !py-1 !text-xs !font-bold !text-white">
                       -{discountPercentage}%
                     </div>
                   ) : (
-                    <div className="!absolute !top-2 !left-2 !bg-red-500 !text-white !px-2 !py-1 !rounded-full !text-xs !font-bold">
+                    <div className="!absolute !left-2 !top-2 !rounded-full !bg-red-500 !px-2 !py-1 !text-xs !font-bold !text-white">
                       Sale
                     </div>
                   );
                 })()}
             </div>
-            <h3 className="!text-[14px] sm:!text-[16px] !font-bold !text-foreground !mb-[4px] sm:!mb-[8px] h-[40px] sm:h-[48px] overflow-hidden">
+            <h3 className="!mb-[4px] h-[40px] overflow-hidden !text-[14px] !font-bold !text-foreground sm:!mb-[8px] sm:h-[48px] sm:!text-[16px]">
               {product.title}
             </h3>
-            <div className="!flex !items-center !justify-between mt-auto">
+            <div className="mt-auto !flex !items-center !justify-between">
               <div className="!flex !items-center !gap-[8px]">
                 {product.salePrice &&
                 product.salePrice !== "" &&
@@ -86,15 +84,15 @@ const Recommendations: React.FC<RecommendationsProps> = ({
                 product.regularPrice &&
                 product.salePrice !== product.regularPrice ? (
                   <div className="!flex !items-center !gap-2">
-                    <span className="!text-primary !text-[14px] sm:!text-[16px] !font-bold">
+                    <span className="!text-[14px] !font-bold !text-primary sm:!text-[16px]">
                       {product.salePrice}
                     </span>
-                    <span className="!text-muted-foreground !text-[12px] sm:!text-[14px] !line-through">
+                    <span className="!text-[12px] !text-muted-foreground !line-through sm:!text-[14px]">
                       {product.regularPrice}
                     </span>
                   </div>
                 ) : (
-                  <span className="!text-muted-foreground !text-[12px] sm:!text-[14px]">
+                  <span className="!text-[12px] !text-muted-foreground sm:!text-[14px]">
                     {product.price}
                   </span>
                 )}
@@ -105,12 +103,12 @@ const Recommendations: React.FC<RecommendationsProps> = ({
                   handleAddToCart(product);
                 }}
                 disabled={addingToCart === product.id}
-                className="!bg-primary hover:!bg-primary-hover !text-primary-foreground !p-[6px] sm:!p-[8px] !rounded-md !transition-colors group-hover:!scale-110 !transform !duration-200 disabled:!opacity-50 disabled:!cursor-not-allowed"
+                className="!transform !rounded-md !bg-primary !p-[6px] !text-primary-foreground !transition-colors !duration-200 hover:!bg-primary-hover disabled:!cursor-not-allowed disabled:!opacity-50 group-hover:!scale-110 sm:!p-[8px]"
               >
                 {addingToCart === product.id ? (
-                  <div className="!w-[12px] !h-[12px] sm:!w-[16px] sm:!h-[16px] !border-2 !border-primary-foreground !border-t-transparent !rounded-full !animate-spin"></div>
+                  <div className="!h-[12px] !w-[12px] !animate-spin !rounded-full !border-2 !border-primary-foreground !border-t-transparent sm:!h-[16px] sm:!w-[16px]"></div>
                 ) : (
-                  <ShoppingCart className="!w-[12px] !h-[12px] sm:!w-[16px] sm:!h-[16px]" />
+                  <ShoppingCart className="!h-[12px] !w-[12px] sm:!h-[16px] sm:!w-[16px]" />
                 )}
               </button>
             </div>

@@ -2,19 +2,9 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import ShadowDOMSearchDropdown from "./components/ShadowDOMSearchDropdown.tsx";
 import "./index.css";
-import { injectIsolatedStyles, applyScopedStyles } from "./lib/styleIsolation";
+import { applyScopedStyles, injectIsolatedStyles } from "./lib/styleIsolation";
 
-import { InitialData, Product, SearchConfig, KalifindWindow } from "./types";
-
-
-// Add comprehensive debugging at the start
-console.log("Kalifind Search: Script loaded and executing");
-console.log("Kalifind Search: Document ready state:", document.readyState);
-console.log("Kalifind Search: Current URL:", window.location.href);
-console.log(
-  "Kalifind Search: All script tags:",
-  document.querySelectorAll('script[src*="kalifind-search.js"]')
-);
+import { InitialData, KalifindWindow, Product, SearchConfig } from "./types";
 
 const prefetchData = async (storeUrl: string) => {
   try {
@@ -39,9 +29,7 @@ const prefetchData = async (storeUrl: string) => {
     }
 
     if (products && products.length > 0) {
-      const prices = products
-        .map((p: Product) => parseFloat(p.price))
-        .filter((p) => !isNaN(p));
+      const prices = products.map((p: Product) => parseFloat(p.price)).filter((p) => !isNaN(p));
       const maxPrice = prices.length > 0 ? Math.max(...prices) : 10000;
 
       const allCategories = new Set<string>();
@@ -71,7 +59,7 @@ const prefetchData = async (storeUrl: string) => {
         categoryCounts,
         brandCounts,
         // Store the actual products with cart fields for cart operations
-        products: products.map(product => ({
+        products: products.map((product) => ({
           ...product,
           // Ensure cart fields are preserved
           shopifyVariantId: product.shopifyVariantId,
@@ -81,14 +69,14 @@ const prefetchData = async (storeUrl: string) => {
           storeType: product.storeType,
           storeUrl: product.storeUrl,
           productUrl: product.productUrl,
-        }))
+        })),
       };
 
       // Store initial data in a global variable instead of cache
       (window as KalifindWindow).kalifindInitialData = initialData;
     }
   } catch (err) {
-    console.error("Failed to prefetch initial data:", err);
+    // Failed to prefetch initial data - silently continue
   }
 };
 
@@ -106,9 +94,7 @@ const ModalManager: React.FC<{
   };
 
   // Use Shadow DOM for complete CSS isolation
-  return (
-    <ShadowDOMSearchDropdown isOpen={isOpen} onClose={handleClose} {...props} />
-  );
+  return <ShadowDOMSearchDropdown isOpen={isOpen} onClose={handleClose} {...props} />;
 };
 
 // Function to find elements in header with class or id containing "search"
@@ -121,24 +107,29 @@ const findSearchTriggerElements = (): Element[] => {
   }
 
   const elements: Element[] = [];
-  
+
   // Look for specific search-related elements in header only
   const searchSelectors = [
-    'search-button',
-    '.search-action',
-    '.search-button', 
-    '.search-trigger',
+    "search-button",
+    ".search-action",
+    ".search-button",
+    ".search-trigger",
     '[aria-label*="search" i]',
     '[aria-label*="Search" i]',
-    '[aria-label*="Open search" i]'
+    '[aria-label*="Open search" i]',
   ];
 
-  searchSelectors.forEach(selector => {
+  searchSelectors.forEach((selector) => {
     try {
       const foundElements = header.querySelectorAll(selector);
-      foundElements.forEach(el => {
+      foundElements.forEach((el) => {
         if (!elements.includes(el)) {
-          console.log("Kalifind Search: Found search element in header:", el, "selector:", selector);
+          console.log(
+            "Kalifind Search: Found search element in header:",
+            el,
+            "selector:",
+            selector
+          );
           elements.push(el);
         }
       });
@@ -156,7 +147,10 @@ const removeExistingSearch = (elements: Element[]): void => {
   console.log("Kalifind Search: removeExistingSearch called with elements:", elements);
   elements.forEach((element) => {
     console.log("Kalifind Search: Processing element:", element);
-    console.log("Kalifind Search: Element attributes:", Array.from(element.attributes).map(attr => `${attr.name}="${attr.value}"`));
+    console.log(
+      "Kalifind Search: Element attributes:",
+      Array.from(element.attributes).map((attr) => `${attr.name}="${attr.value}"`)
+    );
     // Remove standard HTML event attributes
     const eventAttributes = [
       "onclick",
@@ -188,12 +182,17 @@ const removeExistingSearch = (elements: Element[]): void => {
       "on:keyup",
       "on:keypress",
       "on:touchstart",
-      "on:touchend"
+      "on:touchend",
     ];
 
     svelteEventAttributes.forEach((attr) => {
       if (element.hasAttribute(attr)) {
-        console.log("Kalifind Search: Removing Svelte event attribute:", attr, "from element:", element);
+        console.log(
+          "Kalifind Search: Removing Svelte event attribute:",
+          attr,
+          "from element:",
+          element
+        );
         element.removeAttribute(attr);
         console.log("Kalifind Search: Attribute removed, element now:", element);
       }
@@ -201,20 +200,30 @@ const removeExistingSearch = (elements: Element[]): void => {
 
     // Also check for any remaining event attributes that might contain search or modal
     const allAttributes = Array.from(element.attributes);
-    allAttributes.forEach(attr => {
-      if (attr.name.includes('on') && (attr.value.includes('search') || attr.value.includes('modal'))) {
-        console.log("Kalifind Search: Removing event attribute with search/modal:", attr.name, "=", attr.value, "from element:", element);
+    allAttributes.forEach((attr) => {
+      if (
+        attr.name.includes("on") &&
+        (attr.value.includes("search") || attr.value.includes("modal"))
+      ) {
+        console.log(
+          "Kalifind Search: Removing event attribute with search/modal:",
+          attr.name,
+          "=",
+          attr.value,
+          "from element:",
+          element
+        );
         element.removeAttribute(attr.name);
       }
     });
 
     // Also check child elements for on:click attributes
-    const childButtons = element.querySelectorAll('button[on\\:click]');
-    childButtons.forEach(button => {
+    const childButtons = element.querySelectorAll("button[on\\:click]");
+    childButtons.forEach((button) => {
       console.log("Kalifind Search: Found child button with on:click:", button);
-      if (button.hasAttribute('on:click')) {
+      if (button.hasAttribute("on:click")) {
         console.log("Kalifind Search: Removing on:click from child button:", button);
-        button.removeAttribute('on:click');
+        button.removeAttribute("on:click");
       }
     });
   });
@@ -273,18 +282,13 @@ const removeExistingSearch = (elements: Element[]): void => {
       console.warn("Kalifind Search: Already initialized, skipping");
       return;
     }
-    
+
     console.log("Kalifind Search: Initialize function called");
-    const scriptTag = document.querySelector(
-      'script[src*="kalifind-search.js"]'
-    );
+    const scriptTag = document.querySelector('script[src*="kalifind-search.js"]');
     console.log("Kalifind Search: Script tag found:", scriptTag);
     if (!scriptTag) {
       console.error("Kalifind Search script tag not found.");
-      console.log(
-        "Kalifind Search: Available script tags:",
-        document.querySelectorAll("script")
-      );
+      console.log("Kalifind Search: Available script tags:", document.querySelectorAll("script"));
       return;
     }
 
@@ -299,9 +303,7 @@ const removeExistingSearch = (elements: Element[]): void => {
     };
 
     if (!storeUrl) {
-      console.error(
-        "Kalifind Search: storeUrl parameter is required."
-      );
+      console.error("Kalifind Search: storeUrl parameter is required.");
       console.log("Available parameters:", { storeUrl });
       return;
     }
@@ -311,10 +313,7 @@ const removeExistingSearch = (elements: Element[]): void => {
 
     const triggerElements = findSearchTriggerElements();
     console.log("Kalifind Search: Found trigger elements:", triggerElements);
-    console.log(
-      "Kalifind Search: Number of trigger elements:",
-      triggerElements.length
-    );
+    console.log("Kalifind Search: Number of trigger elements:", triggerElements.length);
 
     if (triggerElements.length > 0) {
       removeExistingSearch(triggerElements);
@@ -362,12 +361,10 @@ const removeExistingSearch = (elements: Element[]): void => {
           openSearchModal(configFromUrl);
         });
       } else {
-        console.warn(
-          "Kalifind Search: No header found for fallback icon injection."
-        );
+        console.warn("Kalifind Search: No header found for fallback icon injection.");
       }
     }
-    
+
     // Mark as initialized to prevent multiple initializations
     (window as KalifindWindow).kalifindInitialized = true;
   };
